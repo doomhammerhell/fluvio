@@ -1461,7 +1461,7 @@ dependencies = [
  "dirs",
  "event-listener",
  "fluvio-compression",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-sc-schema",
  "fluvio-smartengine",
@@ -1496,7 +1496,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "fluvio-controlplane-metadata",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-socket",
  "fluvio-types",
@@ -1537,7 +1537,7 @@ dependencies = [
  "dirs",
  "fluvio-channel",
  "fluvio-cli-common",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-package-index",
  "fluvio-types",
  "predicates",
@@ -1569,7 +1569,7 @@ dependencies = [
  "fluvio-cluster",
  "fluvio-command",
  "fluvio-extension-common",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-package-index",
  "fluvio-protocol",
  "fluvio-sc-schema",
@@ -1588,7 +1588,7 @@ dependencies = [
  "indicatif",
  "k8-client",
  "k8-config",
- "k8-types",
+ "k8-types 0.6.1",
  "pretty_assertions",
  "semver 1.0.14",
  "serde",
@@ -1609,7 +1609,7 @@ dependencies = [
 name = "fluvio-cli-common"
 version = "0.0.0"
 dependencies = [
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-package-index",
  "fluvio-types",
  "futures 0.3.24",
@@ -1645,7 +1645,7 @@ dependencies = [
  "fluvio-command",
  "fluvio-controlplane-metadata",
  "fluvio-extension-common",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-helm",
  "fluvio-sc-schema",
  "fluvio-types",
@@ -1656,8 +1656,8 @@ dependencies = [
  "indicatif",
  "k8-client",
  "k8-config",
- "k8-metadata-client",
- "k8-types",
+ "k8-metadata-client 4.0.1",
+ "k8-types 0.6.1",
  "once_cell",
  "portpicker",
  "rand 0.8.5",
@@ -1716,7 +1716,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bytes 1.2.1",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-stream-model",
  "fluvio-types",
@@ -1743,29 +1743,6 @@ dependencies = [
  "serde_yaml 0.9.13",
  "thiserror",
  "tracing",
-]
-
-[[package]]
-name = "fluvio-future"
-version = "0.3.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e2d1fad8e412d44c516add2349a34f6d71d9279b108c8e012325ab17fcbf982"
-dependencies = [
- "async-io",
- "async-net",
- "async-std",
- "async-trait",
- "cfg-if",
- "fluvio-wasm-timer",
- "futures-lite",
- "futures-util",
- "log",
- "openssl",
- "openssl-sys",
- "pin-project",
- "thiserror",
- "tracing",
- "ws_stream_wasm",
 ]
 
 [[package]]
@@ -1836,7 +1813,7 @@ dependencies = [
  "derive_builder",
  "eyre",
  "fluvio-compression",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-protocol-derive",
  "fluvio-types",
@@ -1867,7 +1844,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "fluvio-extension-common",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-sc",
  "fluvio-spu",
  "semver 1.0.14",
@@ -1891,7 +1868,7 @@ dependencies = [
  "fluvio-auth",
  "fluvio-controlplane",
  "fluvio-controlplane-metadata",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-sc-schema",
  "fluvio-service",
@@ -1903,8 +1880,8 @@ dependencies = [
  "flv-util",
  "futures-util",
  "k8-client",
- "k8-metadata-client",
- "k8-types",
+ "k8-metadata-client 4.0.1",
+ "k8-types 0.6.1",
  "once_cell",
  "rand 0.8.5",
  "regex",
@@ -1922,7 +1899,7 @@ name = "fluvio-sc-schema"
 version = "0.15.0"
 dependencies = [
  "fluvio-controlplane-metadata",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-types",
  "log",
@@ -1938,7 +1915,7 @@ name = "fluvio-service"
 version = "0.0.0"
 dependencies = [
  "async-trait",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-socket",
  "fluvio-types",
@@ -1964,7 +1941,7 @@ dependencies = [
  "anyhow",
  "cfg-if",
  "derive_builder",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-smartmodule",
  "fluvio-types",
@@ -2015,7 +1992,7 @@ dependencies = [
  "bytes 1.2.1",
  "cfg-if",
  "event-listener",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "futures-util",
  "once_cell",
@@ -2048,7 +2025,7 @@ dependencies = [
  "fluvio-compression",
  "fluvio-controlplane",
  "fluvio-controlplane-metadata",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-service",
  "fluvio-smartengine",
@@ -2080,7 +2057,7 @@ dependencies = [
  "bytes 1.2.1",
  "educe",
  "flate2",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-smartmodule",
  "fluvio-socket",
@@ -2104,7 +2081,7 @@ dependencies = [
  "clap",
  "derive_builder",
  "fluvio-controlplane-metadata",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-socket",
  "fluvio-spu-schema",
@@ -2130,12 +2107,12 @@ dependencies = [
  "async-rwlock",
  "async-trait",
  "event-listener",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-stream-model",
  "fluvio-types",
  "futures-lite",
- "k8-metadata-client",
- "k8-types",
+ "k8-metadata-client 4.0.1",
+ "k8-types 0.6.1",
  "once_cell",
  "serde",
  "serde_json",
@@ -2149,8 +2126,8 @@ version = "0.8.1"
 dependencies = [
  "async-rwlock",
  "event-listener",
- "fluvio-future 0.4.2",
- "k8-types",
+ "fluvio-future",
+ "k8-types 0.6.1",
  "once_cell",
  "serde",
  "tokio",
@@ -2174,7 +2151,7 @@ dependencies = [
  "fluvio-cluster",
  "fluvio-command",
  "fluvio-controlplane-metadata",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-protocol",
  "fluvio-test-case-derive",
  "fluvio-test-derive 0.0.0",
@@ -2216,7 +2193,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "fluvio",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "fluvio-test-util",
  "inflections",
  "inventory",
@@ -2255,7 +2232,7 @@ dependencies = [
  "fluvio-cluster",
  "fluvio-command",
  "fluvio-controlplane-metadata",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "futures-lite",
  "hdrhistogram",
  "humantime",
@@ -2277,7 +2254,7 @@ name = "fluvio-types"
 version = "0.3.8"
 dependencies = [
  "event-listener",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "thiserror",
  "tokio",
  "tracing",
@@ -2325,7 +2302,7 @@ dependencies = [
  "async-trait",
  "cfg-if",
  "event-listener",
- "fluvio-future 0.4.2",
+ "fluvio-future",
  "futures-lite",
  "futures-util",
  "log",
@@ -3004,22 +2981,22 @@ dependencies = [
 
 [[package]]
 name = "k8-client"
-version = "7.0.1"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f75c80bd15d1ce4f12b002d3a9b7de5b8e0787018913de687a3f4ee007fed7c"
+checksum = "5f2ab958be0d11da969be0522c572f09762ab40a30432fdd23e506541cceb624"
 dependencies = [
  "async-trait",
  "base64",
  "bytes 1.2.1",
  "cfg-if",
- "fluvio-future 0.3.18",
+ "fluvio-future",
  "futures-util",
  "http",
  "hyper",
  "k8-config",
  "k8-diff",
- "k8-metadata-client",
- "k8-types",
+ "k8-metadata-client 5.0.0",
+ "k8-types 0.7.1",
  "pin-utils",
  "rand 0.8.5",
  "serde",
@@ -3064,7 +3041,23 @@ dependencies = [
  "async-trait",
  "futures-util",
  "k8-diff",
- "k8-types",
+ "k8-types 0.6.1",
+ "pin-utils",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "k8-metadata-client"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "651501c896262bc478f439514f9f36114f88a460f65661ed18688f3886a8ee89"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "k8-diff",
+ "k8-types 0.7.1",
  "pin-utils",
  "serde",
  "serde_json",
@@ -3076,6 +3069,16 @@ name = "k8-types"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8debf570f7ab9c2fc4c5f4c59d006b58f97de9570248cf940cd8ec086cc202"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "k8-types"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1dd2af92a6a6f18bc1e7e218e50305e2fd110e94ed22ad8e0672d175f291267"
 dependencies = [
  "serde",
  "serde_json",
@@ -4198,9 +4201,9 @@ dependencies = [
 
 [[package]]
 name = "serde_qs"
-version = "0.9.2"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6af4cee6cd4b23b45e6709150d1e9af5c748131de7e3316a7c2b3008051ed725"
+checksum = "8cac3f1e2ca2fe333923a1ae72caca910b98ed0630bb35ef6f8c8517d6e81afa"
 dependencies = [
  "percent-encoding",
  "serde",
