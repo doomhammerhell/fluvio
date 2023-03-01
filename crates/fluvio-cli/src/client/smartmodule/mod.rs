@@ -1,9 +1,7 @@
 mod create;
 mod list;
 mod delete;
-
-#[cfg(all(feature = "smartengine", not(target_os = "windows")))]
-mod test;
+mod watch;
 
 pub use cmd::SmartModuleCmd;
 
@@ -14,27 +12,26 @@ mod cmd {
 
     use async_trait::async_trait;
     use clap::Parser;
+    use anyhow::Result;
 
     use fluvio::Fluvio;
     use fluvio_extension_common::target::ClusterTarget;
 
-    use crate::Result;
     use crate::client::cmd::ClientCmd;
     use crate::common::output::Terminal;
 
     use super::create::CreateSmartModuleOpt;
     use super::list::ListSmartModuleOpt;
     use super::delete::DeleteSmartModuleOpt;
+    use super::watch::WatchSmartModuleOpt;
 
     #[derive(Debug, Parser)]
     pub enum SmartModuleCmd {
         Create(CreateSmartModuleOpt),
         List(ListSmartModuleOpt),
-        /// Delete one or more Smart Modules with the given name(s)
+        Watch(WatchSmartModuleOpt),
+        /// Delete one or more SmartModules with the given name(s)
         Delete(DeleteSmartModuleOpt),
-
-        #[cfg(all(feature = "smartengine", not(target_os = "windows")))]
-        Test(super::test::TestSmartModuleOpt),
     }
 
     #[async_trait]
@@ -54,8 +51,7 @@ mod cmd {
                 Self::Delete(opt) => {
                     opt.process(out, target).await?;
                 }
-                #[cfg(all(feature = "smartengine", not(target_os = "windows")))]
-                Self::Test(opt) => {
+                Self::Watch(opt) => {
                     opt.process(out, target).await?;
                 }
             }

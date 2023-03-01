@@ -24,16 +24,16 @@
 #[async_std::main]
 async fn main() {
     if let Err(e) = produce_batch().await {
-        println!("Produce error: {:?}", e);
+        println!("Produce error: {e:?}");
     }
 }
 
-async fn produce_batch() -> Result<(), fluvio::FluvioError> {
+async fn produce_batch() -> anyhow::Result<()> {
     let producer = fluvio::producer("batch").await?;
 
     for i in 0..10 {
         producer
-            .send(i.to_string(), format!("This is record {}", i))
+            .send(i.to_string(), format!("This is record {i}"))
             .await?;
     }
     // Only flush after `.send`ing all records

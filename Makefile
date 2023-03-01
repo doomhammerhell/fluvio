@@ -1,4 +1,4 @@
-VERSION := $(shell cat VERSION)
+VERSION ?= $(shell cat VERSION)
 RUSTV?=stable
 GIT_COMMIT=$(shell git rev-parse HEAD)
 ARCH=$(shell uname -m)
@@ -7,6 +7,8 @@ IMAGE_VERSION?=					# If set, this indicates that the image is pre-built and sho
 BUILD_PROFILE=$(if $(RELEASE),release,debug)
 CARGO_BUILDER=$(if $(findstring arm,$(TARGET)),cross,cargo) # If TARGET contains the substring "arm"
 FLUVIO_BIN?=$(if $(TARGET),./target/$(TARGET)/$(BUILD_PROFILE)/fluvio,./target/$(BUILD_PROFILE)/fluvio)
+SMDK_BIN?=$(if $(TARGET),./target/$(TARGET)/$(BUILD_PROFILE)/smdk,./target/$(BUILD_PROFILE)/smdk)
+CDK_BIN?=$(if $(TARGET),./target/$(TARGET)/$(BUILD_PROFILE)/cdk,./target/$(BUILD_PROFILE)/cdk)
 RELEASE_FLAG=$(if $(RELEASE),--release,)
 TARGET_FLAG=$(if $(TARGET),--target $(TARGET),)
 VERBOSE_FLAG=$(if $(VERBOSE),--verbose,)
@@ -18,17 +20,19 @@ BUILD_FLAGS = $(RELEASE_FLAG) $(TARGET_FLAG) $(VERBOSE_FLAG)
 include makefiles/build.mk
 include makefiles/test.mk
 include makefiles/check.mk
+include makefiles/release.mk
+include crates/fluvio-storage/Makefile
 
 
 # misc stuff
 
-helm_pkg:	
+helm_pkg:
 	make -C k8-util/helm package
 
 clean:
 	cargo clean
 	make -C k8-util/helm clean
-	make -C crates/fluvio-smartmodule/examples clean
+	make -C smartmodule/examples clean
 
 
 .EXPORT_ALL_VARIABLES:

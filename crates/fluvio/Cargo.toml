@@ -1,6 +1,6 @@
 [package]
 name = "fluvio"
-version = "0.14.0"
+version = "0.17.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Fluvio Contributors <team@fluvio.io>"]
@@ -14,19 +14,21 @@ name = "fluvio"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["openssl"]
 admin = ["fluvio-sc-schema/use_serde"]
 smartengine = ["fluvio-smartengine"]
-stats = ["sysinfo", "quantities", "hdrhistogram", "strum", "num-traits"]
+openssl = ["fluvio-future/openssl_tls"]
+rustls = ["fluvio-future/rust_tls"]
 unstable = []
 
 [dependencies]
+derive_builder =  "0.12.0"
 tracing = "0.1.19"
 futures-util = "0.3.6"
 bytes = "1.0.1"
-toml = "0.5.5"
+toml = { workspace = true }
 async-rwlock = "1.1.0"
-base64 = { version = "0.13.0" }
+base64 = { workspace = true }
 serde = { version = "1.0.110", features = ['derive'] }
 serde_json = "1.0.53"
 async-channel = "1.1.0"
@@ -39,30 +41,20 @@ semver = "1.0.0"
 pin-project-lite = "0.2"
 siphasher = "0.3.5"
 cfg-if = "1.0.0"
-derive_builder = "0.11.0"
 async-trait = "0.1.51"
-sysinfo = { version = "0.26", optional = true }
-quantities = { version = "0.10.0", features = [
-    "datavolume",
-    "datathroughput",
-    "duration",
-], optional = true }
-hdrhistogram = { version = "7.5.0", optional = true }
-strum = { version = "0.24", features = ["derive"], optional = true }
-num-traits = { version = "0.2", optional = true }
+anyhow = "1.0.38" 
 
 # Fluvio dependencies
-fluvio-future = { version = "0.4.2", features = [
+fluvio-future = { version = "0.4.4", features = [
     "task",
-    "openssl_tls",
     "task_unstable",
     "retry",
     "sync"
 ] }
-fluvio-types = { version = "0.3.7", features = [
+fluvio-types = { version = "0.4.0", features = [
     "events",
 ], path = "../fluvio-types" }
-fluvio-sc-schema = { version = "0.15.0", path = "../fluvio-sc-schema", default-features = false }
+fluvio-sc-schema = { version = "0.17.0", path = "../fluvio-sc-schema", default-features = false }
 fluvio-socket = { path = "../fluvio-socket", version = "0.13.0" }
 fluvio-protocol = { path = "../fluvio-protocol", version = "0.8", features = [
     "record",
@@ -74,26 +66,22 @@ fluvio-smartmodule = { path = "../fluvio-smartmodule", version = "0.4.0", defaul
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dirs = "4.0.0"
 chrono = {version =  "0.4", default-features = false, features = ["clock"]}
-fluvio-smartengine = { path = "../fluvio-smartengine", version = "0.4.0",  optional = true}
+fluvio-smartengine = { path = "../fluvio-smartengine", version = "0.6.0",  optional = true}
 
 [target.'cfg(unix)'.dependencies]
-fluvio-spu-schema = { version = "0.10.0", path = "../fluvio-spu-schema", features = [
+fluvio-spu-schema = { version = "0.12.0", path = "../fluvio-spu-schema", features = [
     "file",
 ] }
 [target.'cfg(windows)'.dependencies]
-fluvio-spu-schema = { version = "0.10.0", path = "../fluvio-spu-schema" }
+fluvio-spu-schema = { version = "0.12.0", path = "../fluvio-spu-schema" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-fluvio-spu-schema = { version = "0.10.0", path = "../fluvio-spu-schema" }
+fluvio-spu-schema = { version = "0.12.0", path = "../fluvio-spu-schema" }
 chrono = {version =  "0.4", features = ["wasmbind", "clock"]}
 
 [dev-dependencies]
 async-std = { version = "1.6.4", default-features = false }
-fluvio-future = { version = "0.4.0", features = ["io", "fixture"] }
-rand = "0.8.5"
-
-[build-dependencies]
-built = "0.5.1"
+fluvio-future = { version = "0.4.4", features = ["io", "fixture"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.24"

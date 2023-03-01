@@ -31,7 +31,7 @@ impl SpuServiceSpec {
 
     /// unique name given spu name
     pub fn service_name(spu_name: &str) -> String {
-        format!("fluvio-spu-{}", spu_name)
+        format!("fluvio-spu-{spu_name}")
     }
 
     pub fn spu_name(meta: &ObjectMeta) -> Option<&String> {
@@ -123,7 +123,7 @@ mod extended {
                 trace!(
                     name = %k8_obj.metadata.name,
                     "skipping non spu service");
-                Err(K8ConvertError::Skip(k8_obj))
+                Err(K8ConvertError::Skip(Box::new(k8_obj)))
             }
         }
     }

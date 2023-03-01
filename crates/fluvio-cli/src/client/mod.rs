@@ -1,10 +1,10 @@
 mod topic;
 mod consume;
+mod hub;
 mod produce;
 mod partition;
 mod tableformat;
 mod smartmodule;
-mod derivedstream;
 
 pub use metadata::client_metadata;
 pub use cmd::FluvioCmd;
@@ -37,20 +37,20 @@ mod cmd {
 
     use clap::{Parser};
     use async_trait::async_trait;
+    use anyhow::Result;
 
     use fluvio::Fluvio;
 
     use crate::common::target::ClusterTarget;
     use crate::common::Terminal;
-    use crate::Result;
 
-    use super::derivedstream::DerivedStreamCmd;
     use super::smartmodule::SmartModuleCmd;
     use super::consume::ConsumeOpt;
     use super::produce::ProduceOpt;
     use super::topic::TopicCmd;
     use super::partition::PartitionCmd;
     use super::tableformat::TableFormatCmd;
+    use super::hub::HubCmd;
 
     #[async_trait]
     pub trait ClientCmd: Sized {
@@ -60,7 +60,12 @@ mod cmd {
             out: Arc<O>,
             target: ClusterTarget,
         ) -> Result<()> {
-            let fluvio_config = target.load()?;
+            let mut fluvio_config = target.load()?;
+            let client_id = match std::env::var("FLUVIO_CLIENT_ID") {
+                Ok(id) => id,
+                Err(_) => "FLUVIO_CLI".to_owned(),
+            };
+            fluvio_config.client_id = Some(client_id);
             let fluvio = Fluvio::connect_with_config(&fluvio_config).await?;
             self.process_client(out, &fluvio).await?;
             Ok(())
@@ -109,7 +114,13 @@ mod cmd {
         /// Create and manage SmartModules
         ///
         /// SmartModules are compiled WASM modules used to create SmartModules.
-        #[clap(subcommand, name = "smart-module", visible_alias = "sm")]
+        #[clap(
+            subcommand,
+            name = "smartmodule",
+            visible_alias = "sm",
+            // FIXME: We should remove this alias when we bump the platform version to 10.x
+            alias = "smart-module"
+        )]
         SmartModule(SmartModuleCmd),
 
         /// Create a TableFormat display specification
@@ -119,12 +130,9 @@ mod cmd {
         #[clap(subcommand, name = "table-format", visible_alias = "tf")]
         TableFormat(TableFormatCmd),
 
-        /// Create and manage DerivedStreams
-        ///
-        /// Use topics, SmartModules or other DerivedStreams
-        /// to build a customized stream to consume
-        #[clap(subcommand, name = "derived-stream", visible_alias = "ds")]
-        DerivedStream(DerivedStreamCmd),
+        /// Work with the SmartModule Hub
+        #[clap(subcommand, name = "hub")]
+        Hub(HubCmd),
     }
 
     impl FluvioCmd {
@@ -153,8 +161,8 @@ mod cmd {
                 Self::TableFormat(tableformat) => {
                     tableformat.process(out, target).await?;
                 }
-                Self::DerivedStream(derivedstream) => {
-                    derivedstream.process(out, target).await?;
+                Self::Hub(hub) => {
+                    hub.process(out, target).await?;
                 }
             }
 

@@ -20,14 +20,13 @@ use crate::replication::leader::{
     SharedReplicaLeadersState, ReplicaLeadersState, FollowerNotifier, SharedSpuUpdates,
 };
 use crate::control_plane::{StatusMessageSink, SharedStatusUpdate};
+use crate::core::metrics::SpuMetrics;
 
 use super::leader_client::LeaderConnections;
 use super::smartmodule::SmartModuleLocalStore;
-use super::derivedstream::DerivedStreamStore;
 use super::spus::SharedSpuLocalStore;
 use super::SharedReplicaLocalStore;
 use super::smartmodule::SharedSmartModuleLocalStore;
-use super::derivedstream::SharedStreamStreamLocalStore;
 use super::spus::SpuLocalStore;
 use super::replica::ReplicaStore;
 use super::SharedSpuConfig;
@@ -40,13 +39,13 @@ pub struct GlobalContext<S> {
     spu_localstore: SharedSpuLocalStore,
     replica_localstore: SharedReplicaLocalStore,
     smartmodule_localstore: SharedSmartModuleLocalStore,
-    derivedstream_localstore: SharedStreamStreamLocalStore,
     leaders_state: SharedReplicaLeadersState<S>,
     followers_state: SharedFollowersState<S>,
     spu_followers: SharedSpuUpdates,
     status_update: SharedStatusUpdate,
     sm_engine: SmartEngine,
     leaders: Arc<LeaderConnections>,
+    metrics: Arc<SpuMetrics>,
 }
 
 // -----------------------------------
@@ -64,12 +63,12 @@ where
     pub fn new(spu_config: SpuConfig) -> Self {
         let spus = SpuLocalStore::new_shared();
         let replicas = ReplicaStore::new_shared();
+        let metrics = Arc::new(SpuMetrics::new());
 
         GlobalContext {
             spu_localstore: spus.clone(),
             replica_localstore: replicas.clone(),
             smartmodule_localstore: SmartModuleLocalStore::new_shared(),
-            derivedstream_localstore: DerivedStreamStore::new_shared(),
             config: Arc::new(spu_config),
             leaders_state: ReplicaLeadersState::new_shared(),
             followers_state: FollowersState::new_shared(),
@@ -77,6 +76,7 @@ where
             status_update: StatusMessageSink::shared(),
             sm_engine: SmartEngine::new(),
             leaders: LeaderConnections::shared(spus, replicas),
+            metrics,
         }
     }
 
@@ -99,10 +99,6 @@ where
 
     pub fn smartmodule_localstore(&self) -> &SmartModuleLocalStore {
         &self.smartmodule_localstore
-    }
-
-    pub fn derivedstream_store(&self) -> &DerivedStreamStore {
-        &self.derivedstream_localstore
     }
 
     pub fn leaders_state(&self) -> &ReplicaLeadersState<S> {
@@ -154,12 +150,16 @@ where
     pub fn leaders(&self) -> Arc<LeaderConnections> {
         self.leaders.clone()
     }
+
+    pub(crate) fn metrics(&self) -> Arc<SpuMetrics> {
+        self.metrics.clone()
+    }
 }
 
 mod file_replica {
 
     use fluvio_controlplane::{ReplicaRemovedRequest, UpdateReplicaRequest};
-    use fluvio_storage::{FileReplica, StorageError};
+    use fluvio_storage::{FileReplica};
     use flv_util::actions::Actions;
     use tracing::{trace, warn};
 
@@ -170,7 +170,7 @@ mod file_replica {
     #[derive(Debug)]
     pub enum ReplicaChange {
         Remove(ReplicaRemovedRequest),
-        StorageError(StorageError),
+        StorageError(anyhow::Error),
     }
 
     impl GlobalContext<FileReplica> {

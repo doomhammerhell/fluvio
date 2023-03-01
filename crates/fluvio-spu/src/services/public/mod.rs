@@ -13,8 +13,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{info, debug, trace, instrument};
 use futures_util::StreamExt;
+use anyhow::Result;
 
-use fluvio_socket::{FluvioSocket, SocketError};
+use fluvio_socket::FluvioSocket;
 use fluvio_service::{FluvioApiServer, FluvioService, ConnectInfo, call_service};
 use fluvio_spu_schema::server::SpuServerRequest;
 use fluvio_spu_schema::server::SpuServerApiKey;
@@ -64,7 +65,7 @@ impl FluvioService for PublicService {
         context: DefaultSharedGlobalContext,
         socket: FluvioSocket,
         _connection: ConnectInfo,
-    ) -> Result<(), SocketError> {
+    ) -> Result<()> {
         let (sink, mut stream) = socket.split();
 
         let mut shared_sink = sink.as_shared();
@@ -78,6 +79,7 @@ impl FluvioService for PublicService {
             match event {
                 Some(Ok(req_message)) => {
                     debug!(%req_message,"received");
+                    //  println!("req: {:#?}", req_message);
                     trace!(
                         "conn: {}, received request: {:#?}",
                         shared_sink.id(),

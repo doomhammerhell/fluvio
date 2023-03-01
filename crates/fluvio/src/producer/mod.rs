@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use tracing::instrument;
 use async_lock::RwLock;
+use anyhow::Result;
 
 use fluvio_protocol::record::ReplicaKey;
 use fluvio_protocol::record::Record;
@@ -16,17 +16,18 @@ mod config;
 mod error;
 pub mod event;
 mod output;
-mod partitioning;
 mod record;
+mod partitioning;
 mod partition_producer;
 mod memory_batch;
 
 pub use fluvio_protocol::record::{RecordKey, RecordData};
 
 use crate::FluvioError;
+use crate::metrics::ClientMetrics;
 use crate::spu::SpuPool;
 use crate::producer::accumulator::{RecordAccumulator, PushRecord};
-use crate::producer::partitioning::PartitionerConfig;
+pub use crate::producer::partitioning::{Partitioner, PartitionerConfig};
 #[cfg(feature = "stats")]
 use crate::stats::{ClientStats, ClientStatsDataCollect, metrics::ClientStatsDataFrame};
 
@@ -41,20 +42,6 @@ pub use self::output::ProduceOutput;
 use self::partition_producer::PartitionProducer;
 pub use self::record::{FutureRecordMetadata, RecordMetadata};
 
-use crate::error::Result;
-
-/// An interface for producing events to a particular topic
-///
-/// A `TopicProducer` allows you to send events to the specific
-/// topic it was initialized for. Once you have a `TopicProducer`,
-/// you can send events to the topic, choosing which partition
-/// each event should be delivered to.
-pub struct TopicProducer {
-    inner: Arc<InnerTopicProducer>,
-    #[cfg(feature = "smartengine")]
-    sm_chain: Option<Arc<RwLock<fluvio_smartengine::SmartModuleChain>>>,
-}
-
 /// Pool of producers for a given topic. There is a producer per partition
 struct ProducerPool {
     flush_events: Vec<(Arc<EventHandler>, Arc<EventHandler>)>,
@@ -67,16 +54,16 @@ impl ProducerPool {
         config: Arc<TopicProducerConfig>,
         topic: String,
         spu_pool: Arc<SpuPool>,
-        batches: Arc<HashMap<PartitionId, BatchHandler>>,
-        #[cfg(feature = "stats")] client_stats: Arc<ClientStats>,
+        batches: Arc<Vec<BatchHandler>>,
+        client_metric: Arc<ClientMetrics>,
     ) -> Self {
         let mut end_events = vec![];
         let mut flush_events = vec![];
         let mut errors = vec![];
-        for (&partition_id, (batch_events, batch_list)) in batches.iter() {
+        for (partition_id, (batch_events, batch_list)) in batches.iter().enumerate() {
             let end_event = StickyEvent::shared();
             let flush_event = (EventHandler::shared(), EventHandler::shared());
-            let replica = ReplicaKey::new(topic.clone(), partition_id);
+            let replica = ReplicaKey::new(topic.clone(), partition_id as PartitionId);
             let error = Arc::new(RwLock::new(None));
 
             PartitionProducer::start(
@@ -88,8 +75,7 @@ impl ProducerPool {
                 error.clone(),
                 end_event.clone(),
                 flush_event.clone(),
-                #[cfg(feature = "stats")]
-                client_stats.clone(),
+                client_metric.clone(),
             );
             errors.push(error);
             end_events.push(end_event);
@@ -106,16 +92,15 @@ impl ProducerPool {
         config: Arc<TopicProducerConfig>,
         topic: String,
         spu_pool: Arc<SpuPool>,
-        batches: Arc<HashMap<PartitionId, BatchHandler>>,
-        #[cfg(feature = "stats")] client_stats: Arc<ClientStats>,
+        batches: Arc<Vec<BatchHandler>>,
+        client_metric: Arc<ClientMetrics>,
     ) -> Arc<Self> {
         Arc::new(ProducerPool::new(
             config,
             topic,
             spu_pool,
             batches,
-            #[cfg(feature = "stats")]
-            client_stats,
+            client_metric,
         ))
     }
 
@@ -161,14 +146,27 @@ impl Drop for ProducerPool {
         self.end();
     }
 }
+
+/// An interface for producing events to a particular topic
+///
+/// A `TopicProducer` allows you to send events to the specific
+/// topic it was initialized for. Once you have a `TopicProducer`,
+/// you can send events to the topic, choosing which partition
+/// each event should be delivered to.
+pub struct TopicProducer {
+    inner: Arc<InnerTopicProducer>,
+    #[cfg(feature = "smartengine")]
+    sm_chain: Option<Arc<RwLock<fluvio_smartengine::SmartModuleChainInstance>>>,
+    #[allow(unused)]
+    metrics: Arc<ClientMetrics>,
+}
+
 struct InnerTopicProducer {
     config: Arc<TopicProducerConfig>,
     topic: String,
     spu_pool: Arc<SpuPool>,
     record_accumulator: RecordAccumulator,
     producer_pool: Arc<ProducerPool>,
-    #[cfg(feature = "stats")]
-    client_stats: Arc<ClientStats>,
 }
 
 impl InnerTopicProducer {
@@ -180,6 +178,7 @@ impl InnerTopicProducer {
 
     async fn push_record(self: Arc<Self>, record: Record) -> Result<PushRecord> {
         let topics = self.spu_pool.metadata.topics();
+
         let topic_spec = topics
             .lookup_by_key(&self.topic)
             .await?
@@ -218,119 +217,91 @@ cfg_if::cfg_if! {
         use std::collections::BTreeMap;
         use once_cell::sync::Lazy;
 
-        use fluvio_spu_schema::server::smartmodule::{LegacySmartModulePayload,SmartModuleContextData,SmartModuleKind,SmartModuleWasmCompressed};
+        use fluvio_spu_schema::server::smartmodule::SmartModuleContextData;
         use fluvio_smartengine::SmartEngine;
-        use fluvio_smartengine::SmartModuleConfig;
+
+        pub use fluvio_smartengine::{SmartModuleChainBuilder, SmartModuleConfig, SmartModuleInitialData};
 
         static SM_ENGINE: Lazy<SmartEngine> = Lazy::new(|| {
             fluvio_smartengine::SmartEngine::new()
         });
 
-
-
         impl TopicProducer {
-            fn init_engine(&mut self, smart_payload: LegacySmartModulePayload) -> Result<(), FluvioError> {
-                let mut chain = SM_ENGINE.new_chain();
-                chain.add_smart_module(
-                    SmartModuleConfig::builder()
-                     .params(smart_payload.params).build()?,
-                    smart_payload.wasm.get_raw()?,
-                    ).map_err(|e| FluvioError::Other(format!("SmartEngine - {:?}", e)))?;
-                self.sm_chain = Some(Arc::new(RwLock::new(chain)));
-                Ok(())
+            /// Adds a chain of SmartModules to this TopicProducer
+            pub fn with_chain(mut self, chain_builder: SmartModuleChainBuilder) -> Result<Self> {
+                let chain_instance = chain_builder.initialize(&SM_ENGINE).map_err(|e| FluvioError::Other(format!("SmartEngine - {e:?}")))?;
+                self.sm_chain = Some(Arc::new(RwLock::new(chain_instance)));
+                Ok(self)
             }
+
             /// Adds a SmartModule filter to this TopicProducer
             pub fn with_filter<T: Into<Vec<u8>>>(
-                mut self,
+                self,
                 filter: T,
                 params: BTreeMap<String, String>,
-            ) -> Result<Self, FluvioError> {
-                let smart_payload = LegacySmartModulePayload {
-                    wasm: SmartModuleWasmCompressed::Raw(filter.into()),
-                    kind: SmartModuleKind::Filter,
-                    params: params.into(),
-                };
-                self.init_engine(smart_payload)?;
-                Ok(self)
+            ) -> Result<Self> {
+                let config = SmartModuleConfig::builder().params(params.into()).build()?;
+                self.with_chain(SmartModuleChainBuilder::from((config, filter)))
             }
 
             /// Adds a SmartModule FilterMap to this TopicProducer
             pub fn with_filter_map<T: Into<Vec<u8>>>(
-                mut self,
+                self,
                 map: T,
                 params: BTreeMap<String, String>,
-            ) -> Result<Self, FluvioError> {
-                let smart_payload = LegacySmartModulePayload {
-                    wasm: SmartModuleWasmCompressed::Raw(map.into()),
-                    kind: SmartModuleKind::FilterMap,
-                    params: params.into(),
-                };
-                self.init_engine(smart_payload)?;
-                Ok(self)
+            ) -> Result<Self> {
+                let config = SmartModuleConfig::builder().params(params.into()).build()?;
+                self.with_chain(SmartModuleChainBuilder::from((config, map)))
             }
 
             /// Adds a SmartModule map to this TopicProducer
             pub fn with_map<T: Into<Vec<u8>>>(
-                mut self,
+                self,
                 map: T,
                 params: BTreeMap<String, String>,
-            ) -> Result<Self, FluvioError> {
-                let smart_payload = LegacySmartModulePayload {
-                    wasm: SmartModuleWasmCompressed::Raw(map.into()),
-                    kind: SmartModuleKind::Map,
-                    params: params.into(),
-                };
-                self.init_engine(smart_payload)?;
-                Ok(self)
+            ) -> Result<Self> {
+                let config = SmartModuleConfig::builder().params(params.into()).build()?;
+                self.with_chain(SmartModuleChainBuilder::from((config, map)))
             }
 
             /// Adds a SmartModule array_map to this TopicProducer
             pub fn with_array_map<T: Into<Vec<u8>>>(
-                mut self,
+                self,
                 map: T,
                 params: BTreeMap<String, String>,
-            ) -> Result<Self, FluvioError> {
-                let smart_payload = LegacySmartModulePayload {
-                    wasm: SmartModuleWasmCompressed::Raw(map.into()),
-                    kind: SmartModuleKind::ArrayMap,
-                    params: params.into(),
-                };
-
-                self.init_engine(smart_payload)?;
-                Ok(self)
+            ) -> Result<Self> {
+                let config = SmartModuleConfig::builder().params(params.into()).build()?;
+                self.with_chain(SmartModuleChainBuilder::from((config, map)))
             }
 
             /// Adds a SmartModule aggregate to this TopicProducer
             pub fn with_aggregate<T: Into<Vec<u8>>>(
-                mut self,
+                self,
                 map: T,
                 params: BTreeMap<String, String>,
                 accumulator: Vec<u8>,
-            ) -> Result<Self, FluvioError> {
-                let smart_payload = LegacySmartModulePayload {
-                    wasm: SmartModuleWasmCompressed::Raw(map.into()),
-                    kind: SmartModuleKind::Aggregate { accumulator },
-                    params: params.into(),
-                };
-                self.init_engine(smart_payload)?;
-                Ok(self)
+            ) -> Result<Self> {
+                let config = SmartModuleConfig::builder()
+                    .initial_data(SmartModuleInitialData::Aggregate{accumulator})
+                    .params(params.into()).build()?;
+                self.with_chain(SmartModuleChainBuilder::from((config, map)))
             }
 
             /// Use generic smartmodule (the type is detected in smartengine)
             pub fn with_smartmodule<T: Into<Vec<u8>>>(
-                mut self,
+                self,
                 smartmodule: T,
                 params: BTreeMap<String, String>,
                 context: SmartModuleContextData,
-            ) -> Result<Self, FluvioError> {
-                let smart_payload = LegacySmartModulePayload {
-                    wasm: SmartModuleWasmCompressed::Raw(smartmodule.into()),
-                    kind: SmartModuleKind::Generic ( context ),
-                    params: params.into(),
+            ) -> Result<Self> {
+                let mut config_builder = SmartModuleConfig::builder();
+                config_builder.params(params.into());
+                if let SmartModuleContextData::Aggregate{accumulator} = context {
+                    config_builder.initial_data(SmartModuleInitialData::Aggregate{accumulator});
                 };
-                self.init_engine(smart_payload)?;
-                Ok(self)
+                self.with_chain(SmartModuleChainBuilder::from((config_builder.build()?, smartmodule)))
             }
+
         }
     }
 }
@@ -340,6 +311,7 @@ impl TopicProducer {
         topic: String,
         spu_pool: Arc<SpuPool>,
         config: TopicProducerConfig,
+        metrics: Arc<ClientMetrics>,
     ) -> Result<Self> {
         let config = Arc::new(config);
         let topics = spu_pool.metadata.topics();
@@ -356,43 +328,29 @@ impl TopicProducer {
                 CompressionAlgorithm::Gzip => match config.compression {
                     Some(Compression::Gzip) | None => Compression::Gzip,
                     Some(compression_config) => return Err(FluvioError::Producer(ProducerError::InvalidConfiguration(
-                        format!("Compression in the producer ({}) does not match with topic level compression (gzip)", compression_config),
-                    ))),
+                        format!("Compression in the producer ({compression_config}) does not match with topic level compression (gzip)" ),
+                    )).into()),
                 },
                 CompressionAlgorithm::Snappy => match config.compression {
                     Some(Compression::Snappy) | None => Compression::Snappy,
                     Some(compression_config) => return Err(FluvioError::Producer(ProducerError::InvalidConfiguration(
-                        format!("Compression in the producer ({}) does not match with topic level compression (snappy)", compression_config),
-                    ))),
+                        format!("Compression in the producer ({compression_config}) does not match with topic level compression (snappy)" ),
+                    )).into()),
                 },
                 CompressionAlgorithm::Lz4 => match config.compression {
                     Some(Compression::Lz4) | None => Compression::Lz4,
                     Some(compression_config) => return Err(FluvioError::Producer(ProducerError::InvalidConfiguration(
-                        format!("Compression in the producer ({}) does not match with topic level compression (lz4)", compression_config),
-                    ))),
+                        format!("Compression in the producer ({compression_config}) does not match with topic level compression (lz4)"),
+                    )).into()),
                 },
             CompressionAlgorithm::None => match config.compression {
                     Some(Compression::None) | None => Compression::None,
                     Some(compression_config) => return Err(FluvioError::Producer(ProducerError::InvalidConfiguration(
-                        format!("Compression in the producer ({}) does not match with topic level compression (no compression)", compression_config)
+                        format!("Compression in the producer ({compression_config}) does not match with topic level compression (no compression)" )
 
-                    ))),
+                    )).into()),
                 },
             };
-        #[cfg(feature = "stats")]
-        let client_stats = ClientStats::new_shared(config.stats_collect);
-        #[cfg(feature = "stats")]
-        // start the histogram
-        if config.stats_collect != ClientStatsDataCollect::None {
-            ClientStats::start_stats_histogram(client_stats.clone());
-        };
-        #[cfg(feature = "stats")]
-        // Only start background system monitoring when requested
-        if config.stats_collect == ClientStatsDataCollect::All
-            || config.stats_collect == ClientStatsDataCollect::System
-        {
-            ClientStats::start_system_monitor(client_stats.clone());
-        };
 
         let record_accumulator = RecordAccumulator::new(
             config.batch_size,
@@ -405,8 +363,7 @@ impl TopicProducer {
             topic.clone(),
             spu_pool.clone(),
             record_accumulator.batches(),
-            #[cfg(feature = "stats")]
-            client_stats.clone(),
+            metrics.clone(),
         );
 
         Ok(Self {
@@ -416,11 +373,10 @@ impl TopicProducer {
                 spu_pool,
                 producer_pool,
                 record_accumulator,
-                #[cfg(feature = "stats")]
-                client_stats,
             }),
             #[cfg(feature = "smartengine")]
             sm_chain: Default::default(),
+            metrics,
         })
     }
 
@@ -430,12 +386,12 @@ impl TopicProducer {
     ///
     /// ```
     /// # use fluvio::{TopicProducer, FluvioError};
-    /// # async fn example(producer: &TopicProducer) -> Result<(), FluvioError> {
+    /// # async fn example(producer: &TopicProducer) -> anyhow::Result<()> {
     /// producer.send("Key", "Value").await?;
     /// producer.flush().await?;
     /// # Ok(())
     /// # }
-    pub async fn flush(&self) -> Result<(), FluvioError> {
+    pub async fn flush(&self) -> Result<()> {
         self.inner.flush().await
     }
 
@@ -453,7 +409,7 @@ impl TopicProducer {
     ///
     /// ```
     /// # use fluvio::{TopicProducer, FluvioError};
-    /// # async fn example(producer: &TopicProducer) -> Result<(), FluvioError> {
+    /// # async fn example(producer: &TopicProducer) -> anyhow::Result<()> {
     /// producer.send("Key", "Value").await?;
     /// # Ok(())
     /// # }
@@ -462,7 +418,7 @@ impl TopicProducer {
         skip(self, key, value),
         fields(topic = %self.inner.topic),
     )]
-    pub async fn send<K, V>(&self, key: K, value: V) -> Result<ProduceOutput, FluvioError>
+    pub async fn send<K, V>(&self, key: K, value: V) -> Result<ProduceOutput>
     where
         K: Into<RecordKey>,
         V: Into<RecordData>,
@@ -478,12 +434,14 @@ impl TopicProducer {
                 use std::convert::TryFrom;
                 use fluvio_smartmodule::dataplane::smartmodule::SmartModuleInput;
 
+                let metrics = self.metrics.chain_metrics();
 
                 if let Some(
                     smart_chain_ref
                 ) = &self.sm_chain {
                     let mut sm_chain = smart_chain_ref.write().await;
-                    let output = sm_chain.process(SmartModuleInput::try_from(entries)?).map_err(|e| FluvioError::Other(format!("SmartEngine - {:?}", e)))?;
+
+                    let output = sm_chain.process(SmartModuleInput::try_from(entries)?,metrics).map_err(|e| FluvioError::Other(format!("SmartEngine - {e:?}")))?;
                     entries = output.successes;
                 }
             } else {
@@ -503,7 +461,7 @@ impl TopicProducer {
         skip(self, records),
         fields(topic = %self.inner.topic),
     )]
-    pub async fn send_all<K, V, I>(&self, records: I) -> Result<Vec<ProduceOutput>, FluvioError>
+    pub async fn send_all<K, V, I>(&self, records: I) -> Result<Vec<ProduceOutput>>
     where
         K: Into<RecordKey>,
         V: Into<RecordData>,
@@ -522,6 +480,11 @@ impl TopicProducer {
     /// This is needed once an error is present in order to send new records again.
     pub async fn clear_errors(&self) {
         self.inner.clear_errors().await;
+    }
+
+    /// Return a shared instance of `ClientMetrics`
+    pub fn metrics(&self) -> Arc<ClientMetrics> {
+        self.metrics.clone()
     }
 
     #[cfg(feature = "stats")]

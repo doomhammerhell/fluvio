@@ -2,15 +2,23 @@ use std::fs::File;
 use std::io::{ErrorKind, Error as IoError};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
+
 use semver::Version;
+use anyhow::{anyhow, Result};
+
 use fluvio_index::{HttpAgent, PackageId, Target, WithVersion, PackageVersion};
+
 use crate::FLUVIO_EXTENSIONS_DIR;
-use fluvio_types::defaults::CLI_CONFIG_PATH;
-use crate::error::{Result, CliError};
+use crate::error::PackageNotFound;
 
 pub const FLUVIO_DIR: &str = "FLUVIO_DIR";
 
-fn fluvio_base_dir() -> Result<PathBuf> {
+#[cfg(feature = "default")]
+use fluvio_types::defaults::CLI_CONFIG_PATH;
+#[cfg(not(feature = "default"))]
+pub const CLI_CONFIG_PATH: &str = ".fluvio";
+
+pub fn fluvio_base_dir() -> Result<PathBuf> {
     if let Ok(dir) = std::env::var(FLUVIO_DIR) {
         // Assume this is like `~/.fluvio
         let path = PathBuf::from(dir);
@@ -21,6 +29,10 @@ fn fluvio_base_dir() -> Result<PathBuf> {
     let path = home.join(CLI_CONFIG_PATH);
 
     fluvio_base_dir_create(path)
+}
+
+pub fn fluvio_bin_dir() -> Result<PathBuf> {
+    Ok(fluvio_base_dir()?.join("bin"))
 }
 
 fn fluvio_base_dir_create(path: PathBuf) -> Result<PathBuf> {
@@ -46,11 +58,14 @@ pub fn fluvio_extensions_dir() -> Result<PathBuf> {
     }
 }
 
+// Think about adding check in bin dir for extensions.
+// Add to count by skipping anything that starts with `fluvio-`
+// I'm not sure if this is how things get added to the CLI though
 pub fn get_extensions() -> Result<Vec<PathBuf>> {
     use std::fs;
     let mut extensions = Vec::new();
     let fluvio_dir = fluvio_extensions_dir()?;
-    if let Ok(entries) = fs::read_dir(&fluvio_dir) {
+    if let Ok(entries) = fs::read_dir(fluvio_dir) {
         for entry in entries.flatten() {
             let is_plugin = entry.file_name().to_string_lossy().starts_with("fluvio-");
             if is_plugin {
@@ -107,11 +122,7 @@ pub async fn fetch_package_file(
             let body = crate::http::read_to_end(tag_response).await?;
             agent.tag_version_from_response(tag, &body).await?
         }
-        _ => {
-            return Err(
-                fluvio_index::Error::Other("unknown PackageVersion type".to_string()).into(),
-            )
-        }
+        _ => return Err(anyhow!("unknown PackageVersion type")),
     };
 
     // Download the package file from the package registry
@@ -119,11 +130,12 @@ pub async fn fetch_package_file(
     debug!(uri = %download_request.uri(), "Requesting package download:");
     let response = crate::http::execute(download_request).await?;
     if !response.status().is_success() {
-        return Err(CliError::PackageNotFound {
+        return Err(PackageNotFound {
             package: id.clone().into_unversioned(),
             version: version.clone(),
             target: target.clone(),
-        });
+        }
+        .into());
     }
 
     let package_file = crate::http::read_to_end(response).await?;
@@ -162,7 +174,7 @@ pub fn install_bin<P: AsRef<Path>, B: AsRef<[u8]>>(bin_path: P, bytes: B) -> Res
     let parent = bin_path
         .parent()
         .ok_or_else(|| IoError::new(ErrorKind::NotFound, "parent directory not found"))?;
-    std::fs::create_dir_all(&parent)?;
+    std::fs::create_dir_all(parent)?;
 
     // Create a temporary dir to write file to
     let tmp_dir = tempdir::TempDir::new_in(parent, "fluvio-tmp")?;
@@ -176,7 +188,7 @@ pub fn install_bin<P: AsRef<Path>, B: AsRef<[u8]>>(bin_path: P, bytes: B) -> Res
     make_executable(&mut tmp_file)?;
 
     // Rename (atomic move on unix) temp file to destination
-    std::fs::rename(&tmp_path, &bin_path)?;
+    std::fs::rename(&tmp_path, bin_path)?;
 
     Ok(())
 }

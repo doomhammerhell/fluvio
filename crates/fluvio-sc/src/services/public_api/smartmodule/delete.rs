@@ -1,23 +1,24 @@
 use std::io::{Error, ErrorKind};
 
-use tracing::{debug, trace, instrument};
+use tracing::{debug, trace, instrument, info};
+use anyhow::Result;
 
 use fluvio_sc_schema::Status;
 use fluvio_auth::{AuthContext, InstanceAction};
-use fluvio_controlplane_metadata::smartmodule::SmartModuleSpec;
+use fluvio_controlplane_metadata::smartmodule::{SmartModuleSpec, SmartModulePackageKey};
 use fluvio_controlplane_metadata::extended::SpecExt;
 
 use crate::services::auth::AuthServiceContext;
 
-/// Handler for delete smart module request
+/// Handler for delete smartmodule request
 #[instrument(skip(name, auth_ctx))]
 pub async fn handle_delete_smartmodule<AC: AuthContext>(
     name: String,
     auth_ctx: &AuthServiceContext<AC>,
-) -> Result<Status, Error> {
+) -> Result<Status> {
     use fluvio_protocol::link::ErrorCode;
 
-    debug!("delete smart modules: {}", name);
+    debug!(%name,"deleting smartmodule");
 
     if let Ok(authorized) = auth_ctx
         .auth
@@ -33,23 +34,22 @@ pub async fn handle_delete_smartmodule<AC: AuthContext>(
             ));
         }
     } else {
-        return Err(Error::new(ErrorKind::Interrupted, "authorization io error"));
+        return Err(Error::new(ErrorKind::Interrupted, "authorization io error").into());
     }
+
+    let sm_fqdn = SmartModulePackageKey::from_qualified_name(&name)?.store_id();
+
+    info!(%sm_fqdn,"deleting smartmodule");
 
     let status = if auth_ctx
         .global_ctx
         .smartmodules()
         .store()
-        .value(&name)
+        .value(&sm_fqdn)
         .await
         .is_some()
     {
-        if let Err(err) = auth_ctx
-            .global_ctx
-            .smartmodules()
-            .delete(name.clone())
-            .await
-        {
+        if let Err(err) = auth_ctx.global_ctx.smartmodules().delete(sm_fqdn).await {
             Status::new(
                 name.clone(),
                 ErrorCode::SmartModuleError,
@@ -66,7 +66,7 @@ pub async fn handle_delete_smartmodule<AC: AuthContext>(
         )
     };
 
-    trace!("flv delete smart module resp {:#?}", status);
+    trace!("smartmodule deleting resp {:#?}", status);
 
     Ok(status)
 }

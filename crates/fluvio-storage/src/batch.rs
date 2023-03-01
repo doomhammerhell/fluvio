@@ -1,24 +1,45 @@
 use std::io::Error as IoError;
 use std::io::Cursor;
-use std::io::ErrorKind;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::path::Path;
 
-use fluvio_future::fs::File;
+use fluvio_protocol::record::BatchHeader;
+use fluvio_protocol::record::Offset;
+use tracing::error;
 use tracing::instrument;
 use tracing::trace;
-use tracing::debug;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
 
+use fluvio_future::fs::File;
 use fluvio_protocol::record::{
-    Batch, BatchRecords, BATCH_PREAMBLE_SIZE, BATCH_HEADER_SIZE, BATCH_FILE_HEADER_SIZE,
-    MemoryRecords,
+    Batch, BatchRecords, BATCH_HEADER_SIZE, BATCH_FILE_HEADER_SIZE, MemoryRecords,
 };
 use fluvio_protocol::record::Size;
 
 use crate::file::FileBytesIterator;
+
+#[derive(Debug, thiserror::Error, Clone)]
+/// Outer batch representation
+/// It's either sucessfully decoded into actual batch or not enough bytes to decode
+pub enum BatchHeaderError {
+    #[error("Not Enough Header {pos}, {actual_len} {expected_len}")]
+    NotEnoughHeader {
+        pos: u32,
+        actual_len: usize,
+        expected_len: usize,
+    },
+    #[error("Not Enough Content {pos} {base_offset} {actual_len} {expected_len}")]
+    NotEnoughContent {
+        header: BatchHeader,
+        base_offset: Offset,
+        pos: u32,
+        actual_len: usize,
+        expected_len: usize,
+    },
+}
 
 /// hold information about position of batch in the file
 pub struct FileBatchPos<R>
@@ -31,48 +52,22 @@ where
 
 impl<R> Unpin for FileBatchPos<R> where R: BatchRecords {}
 
-#[allow(clippy::len_without_is_empty)]
 impl<R> FileBatchPos<R>
 where
     R: BatchRecords,
 {
-    fn new(inner: Batch<R>, pos: Size) -> Self {
-        FileBatchPos { inner, pos }
-    }
-
-    #[inline(always)]
-    pub fn get_batch(&self) -> &Batch<R> {
-        &self.inner
-    }
-
-    #[inline(always)]
-    pub fn get_pos(&self) -> Size {
-        self.pos
-    }
-
-    /// batch length (without preamble)
-    #[inline(always)]
-    pub fn len(&self) -> Size {
-        self.inner.batch_len as Size
-    }
-
-    /// total batch length including preamble
-    #[inline(always)]
-    pub fn total_len(&self) -> Size {
-        self.len() + BATCH_PREAMBLE_SIZE as Size
-    }
-
-    /// decode next batch from sequence map
+    /// read from storage byt iterator
     #[instrument(skip(file))]
     pub(crate) async fn read_from<S: StorageBytesIterator>(
         file: &mut S,
-    ) -> Result<Option<FileBatchPos<R>>, IoError> {
+    ) -> Result<Option<FileBatchPos<R>>> {
         let pos = file.get_pos();
+        trace!(pos, "reading from pos");
         let bytes = match file.read_bytes(BATCH_FILE_HEADER_SIZE as u32).await? {
             Some(bytes) => bytes,
 
             None => {
-                trace!("no more bytes,there are no more batches");
+                trace!("no bytes read, returning empty");
                 return Ok(None);
             }
         };
@@ -82,17 +77,16 @@ where
             read_len,
             bytes_len = bytes.len(),
             BATCH_FILE_HEADER_SIZE,
-            "file batch: read preamble and header",
+            "readed batch header",
         );
 
         if read_len < BATCH_FILE_HEADER_SIZE {
-            return Err(IoError::new(
-                ErrorKind::UnexpectedEof,
-                format!(
-                    "expected: {} but only {} bytes read",
-                    BATCH_FILE_HEADER_SIZE, read_len
-                ),
-            ));
+            return Err(BatchHeaderError::NotEnoughHeader {
+                actual_len: read_len,
+                expected_len: BATCH_FILE_HEADER_SIZE,
+                pos,
+            }
+            .into());
         }
 
         let mut cursor = Cursor::new(bytes);
@@ -108,41 +102,30 @@ where
         }
         */
 
-        let mut batch_position = FileBatchPos::new(batch, pos);
-
-        let remainder = batch_position.len() as usize - BATCH_HEADER_SIZE as usize;
+        let content_len = batch.batch_len as usize - BATCH_HEADER_SIZE;
         trace!(
-            last_offset = batch_position.get_batch().get_last_offset(),
-            remainder,
+            last_offset = batch.get_last_offset(),
+            content_len,
             pos,
-            "decoding header",
+            "trying to read batch content",
         );
 
-        batch_position.read_records(file, remainder).await?;
-
-        Ok(Some(batch_position))
-    }
-
-    /// decode the records of contents
-    async fn read_records<'a, S>(
-        &'a mut self,
-        file: &'a mut S,
-        content_len: usize,
-    ) -> Result<(), IoError>
-    where
-        S: StorageBytesIterator,
-    {
         // for now se
         let bytes = match file.read_bytes(content_len as u32).await? {
             Some(bytes) => bytes,
             None => {
-                return Err(IoError::new(
-                    ErrorKind::UnexpectedEof,
-                    "not enough for records",
-                ));
+                return Err(BatchHeaderError::NotEnoughContent {
+                    base_offset: batch.get_base_offset(),
+                    header: batch.header,
+                    actual_len: 0,
+                    expected_len: content_len,
+                    pos,
+                }
+                .into())
             }
         };
 
+        // get actual bytes read
         let read_len = bytes.len();
 
         trace!(
@@ -152,22 +135,40 @@ where
         );
 
         if read_len < content_len {
-            return Err(IoError::new(
-                ErrorKind::UnexpectedEof,
-                "not enough for records",
-            ));
+            return Err(BatchHeaderError::NotEnoughContent {
+                base_offset: batch.get_base_offset(),
+                header: batch.header,
+                actual_len: read_len,
+                expected_len: content_len,
+                pos,
+            }
+            .into());
         }
 
         let mut cursor = Cursor::new(bytes);
-        self.inner.mut_records().decode(&mut cursor, 0)?;
+        batch.mut_records().decode(&mut cursor, 0)?;
 
-        Ok(())
+        Ok(Some(FileBatchPos { inner: batch, pos }))
+    }
+
+    #[inline(always)]
+    pub fn get_pos(&self) -> Size {
+        self.pos
+    }
+
+    #[inline(always)]
+    pub fn get_batch(&self) -> &Batch<R> {
+        &self.inner
+    }
+
+    pub fn inner(self) -> Batch<R> {
+        self.inner
     }
 }
 
 // Stream to iterate over batches in a file
 pub struct FileBatchStream<R = MemoryRecords, S = FileBytesIterator> {
-    invalid: Option<IoError>,
+    invalid: bool,
     byte_iterator: S,
     data: PhantomData<R>,
 }
@@ -177,8 +178,8 @@ where
     R: Default + Debug,
     S: StorageBytesIterator,
 {
-    /// check if it is invalid
-    pub fn invalid(self) -> Option<IoError> {
+    // mark as invalid
+    pub fn is_invalid(&self) -> bool {
         self.invalid
     }
 
@@ -211,7 +212,7 @@ where
 
         Ok(Self {
             byte_iterator,
-            invalid: None,
+            invalid: false,
             data: PhantomData,
         })
     }
@@ -221,20 +222,24 @@ where
 
         Ok(Self {
             byte_iterator,
-            invalid: None,
+            invalid: false,
             data: PhantomData,
         })
     }
 
+    /// get next batch position
+    /// if there is an error, it will be stored in `invalid` field
     #[instrument(skip(self))]
-    pub async fn next(&mut self) -> Option<FileBatchPos<R>> {
-        trace!(pos = self.get_pos(), "reading next from");
+    pub async fn try_next(&mut self) -> Result<Option<FileBatchPos<R>>> {
+        if self.invalid {
+            return Err(anyhow!("stream has been invalidated"));
+        }
         match FileBatchPos::read_from(&mut self.byte_iterator).await {
-            Ok(batch_res) => batch_res,
+            Ok(batch_res) => Ok(batch_res),
             Err(err) => {
-                debug!("error getting batch: {}", err);
-                self.invalid = Some(err);
-                None
+                error!("error getting batch: {}, invalidating", err);
+                self.invalid = true;
+                Err(err)
             }
         }
     }
@@ -299,12 +304,13 @@ mod tests {
             .open_batch_header_stream(0)
             .await
             .expect("open file batch stream");
-        let batch1 = batch_stream.next().await.expect("batch");
-        let batch = batch1.get_batch();
+        let batch1 = batch_stream.try_next().await.expect("ok").expect("batch");
+        let pos = batch1.get_pos();
+        let batch = batch1.inner();
         assert_eq!(batch.get_base_offset(), 300);
         assert_eq!(batch.get_header().producer_id, 12);
-        assert_eq!(batch1.get_batch().get_last_offset(), 301);
-        assert_eq!(batch1.get_pos(), 0);
+        assert_eq!(batch.get_last_offset(), 301);
+        assert_eq!(pos, 0);
     }
 
     #[fluvio_future::test]
@@ -331,10 +337,10 @@ mod tests {
             .expect("open file batch stream");
 
         assert_eq!(batch_stream.get_pos(), 0);
-        let batch1 = batch_stream.next().await.expect("batch");
+        let batch1 = batch_stream.try_next().await.expect("ok").expect("batch");
         assert_eq!(batch1.get_batch().get_last_offset(), 301);
         assert_eq!(batch_stream.get_pos(), 79);
-        let batch2 = batch_stream.next().await.expect("batch");
+        let batch2 = batch_stream.try_next().await.expect("ok").expect("batch");
         assert_eq!(batch2.get_batch().get_last_offset(), 303);
     }
 }

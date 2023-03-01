@@ -3,23 +3,25 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use async_lock::Mutex;
 use async_trait::async_trait;
 
+use fluvio::metrics::ClientMetrics;
 use fluvio::{FluvioError, PartitionConsumer};
 use fluvio::spu::{SpuDirectory, SpuSocket};
-use fluvio::sockets::{ClientConfig, VersionedSerialSocket};
 use fluvio_controlplane_metadata::partition::ReplicaKey;
-use fluvio_socket::MultiplexerSocket;
-use fluvio_types::SpuId;
+use fluvio_socket::{MultiplexerSocket, ClientConfig, VersionedSerialSocket};
+use fluvio_types::{SpuId, PartitionId};
 use tracing::{debug, instrument};
 
 use super::SharedReplicaLocalStore;
 use super::spus::SharedSpuLocalStore;
 
 /// maintain connections to all leaders
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct LeaderConnections {
     spus: SharedSpuLocalStore,
     replicas: SharedReplicaLocalStore,
     leaders: Arc<Mutex<HashMap<SpuId, SpuSocket>>>,
+    metrics: Arc<ClientMetrics>,
 }
 
 impl LeaderConnections {
@@ -27,7 +29,8 @@ impl LeaderConnections {
         LeaderConnections {
             spus,
             replicas,
-            ..Default::default()
+            leaders: Default::default(),
+            metrics: Arc::new(ClientMetrics::new()),
         }
     }
     pub fn shared(spus: SharedSpuLocalStore, replicas: SharedReplicaLocalStore) -> Arc<Self> {
@@ -57,12 +60,12 @@ impl LeaderConnections {
     pub async fn partition_consumer<S>(
         self: Arc<Self>,
         topic: S,
-        partition: i32,
+        partition: PartitionId,
     ) -> PartitionConsumer<LeaderConnections>
     where
         S: Into<String> + Debug,
     {
-        PartitionConsumer::new(topic.into(), partition, self.clone())
+        PartitionConsumer::new(topic.into(), partition, self.clone(), self.metrics.clone())
     }
 }
 

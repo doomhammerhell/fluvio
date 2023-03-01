@@ -1,0 +1,17 @@
+[package]
+name = "cargo-builder"
+version = "0.0.0"
+edition = "2021"
+authors = ["Fluvio Contributors <team@fluvio.io>"]
+description = "Build Cargo project programmability"
+repository = "https://github.com/infinyon/fluvio"
+license = "Apache-2.0"
+publish = false
+
+
+
+[dependencies]
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+derive_builder = { workspace = true }
+cargo_metadata = "0.15.0"

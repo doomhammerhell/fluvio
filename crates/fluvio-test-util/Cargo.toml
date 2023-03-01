@@ -10,10 +10,10 @@ publish = false
 
 
 [dependencies]
-bytes = "1.0"
-tracing = "0.1"
+bytes = { workspace = true }
+tracing = { workspace = true }
 futures-lite = "1.11.0"
-clap = { version = "3.1.8", features = ["std", "derive"], default-features = false }
+clap = { workspace = true , features = ["std", "derive", "help", "usage", "error-context"], default-features = false }
 async-trait = "0.1.21"
 tokio = { version = "1.4", features = ["macros"] }
 syn = "1.0"
@@ -29,8 +29,10 @@ dyn-clone = "1.0"
 semver = "1.0.0"
 hdrhistogram = "7.3.0"
 uuid = { version = "1.1", features = ["serde", "v4"] }
+anyhow = { workspace = true }
 
 fluvio = { path = "../fluvio" }
+fluvio-types = { path = "../fluvio-types" }
 fluvio-future = { version = "0.4.0", features = ["task", "timer", "subscriber", "fixture"] }
 fluvio-cluster = { path = "../fluvio-cluster" }
 fluvio-command = { version = "0.2.0" }

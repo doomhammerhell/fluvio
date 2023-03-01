@@ -1,6 +1,9 @@
-use fluvio::{RecordKey, TopicProducer, TopicProducerConfigBuilder, FluvioAdmin, FluvioError};
-use fluvio_controlplane_metadata::partition::PartitionSpec;
 use clap::Parser;
+
+use anyhow::Result;
+
+use fluvio::{RecordKey, TopicProducer, TopicProducerConfigBuilder, FluvioAdmin};
+use fluvio_controlplane_metadata::partition::PartitionSpec;
 
 use fluvio_test_derive::fluvio_test;
 use fluvio_test_case_derive::MyTestCase;
@@ -30,15 +33,12 @@ pub async fn produce_batch(
 
     let leader = {
         let admin: FluvioAdmin = test_driver.client().admin().await;
-        let partitions = admin
-            .list::<PartitionSpec, _>(vec![])
-            .await
-            .expect("partitions");
+        let partitions = admin.all::<PartitionSpec>().await.expect("partitions");
         let test_topic = &partitions[0];
         test_topic.spec.leader
     };
 
-    println!("Found leader {}", leader);
+    println!("Found leader {leader}");
 
     let cluster_manager = test_driver
         .get_cluster()
@@ -49,7 +49,7 @@ pub async fn produce_batch(
     println!("Got cluster manager");
 
     let value = "a".repeat(5000);
-    let result: Result<_, FluvioError> = (|| async move {
+    let result: Result<_> = (|| async move {
         let mut results = Vec::new();
         for _ in 0..1000 {
             let result = producer.send(RecordKey::NULL, value.clone()).await?;

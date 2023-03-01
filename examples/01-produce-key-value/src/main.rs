@@ -28,11 +28,11 @@ async fn main() {
         .try_init();
 
     if let Err(e) = produce_key_value().await {
-        println!("Produce error: {:?}", e);
+        println!("Produce error: {e:?}");
     }
 }
 
-async fn produce_key_value() -> Result<(), fluvio::FluvioError> {
+async fn produce_key_value() -> anyhow::Result<()> {
     let producer = fluvio::producer("key-value").await?;
 
     let key = "Hello";
@@ -41,6 +41,6 @@ async fn produce_key_value() -> Result<(), fluvio::FluvioError> {
     println!("About to send");
     producer.send(key, value).await?;
     producer.flush().await?;
-    println!("[{}] {}", key, value);
+    println!("[{key}] {value}");
     Ok(())
 }

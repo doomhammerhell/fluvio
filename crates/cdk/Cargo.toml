@@ -1,0 +1,41 @@
+[package]
+name = "cdk"
+version = "0.0.0"
+edition = "2021"
+authors = ["Fluvio Contributors <team@fluvio.io>"]
+description = "Connector Development Kit"
+repository = "https://github.com/infinyon/fluvio"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "cdk"
+path = "src/main.rs"
+doc = false
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["fluvio"]
+
+[dependencies]
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "env", "wrap_help", "suggestions"], default-features = false }
+cargo-builder = { path = "../cargo-builder"}
+
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+toml = { workspace=true, default-features = false, features = ["parse", "display", "preserve_order"] }
+comfy-table = { version = "6.1" }
+sysinfo = { version = "0.27", default-features = false }
+cargo-generate = "0.18.0"
+include_dir = "0.7.2"
+tempfile = "3.3.0"
+lib-cargo-crate = "0.1.6"
+enum-display = "0.1.3"
+
+
+fluvio = { path = "../fluvio"}
+fluvio-connector-deployer = { path = "../fluvio-connector-deployer"}
+fluvio-connector-package = { path = "../fluvio-connector-package", features = ["toml"]}
+fluvio-future = { workspace = true, features = ["subscriber"]}
+fluvio-hub-util = { path = "../fluvio-hub-util" }

@@ -1,0 +1,41 @@
+[package]
+name = "smartmodule-development-kit"
+version = "0.0.0"
+edition = "2021"
+authors = ["Fluvio Contributors <team@fluvio.io>"]
+description = "SmartModule Development Kit"
+repository = "https://github.com/infinyon/fluvio"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "smdk"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true,features = ["std", "derive", "help", "usage", "error-context", "env", "wrap_help", "suggestions"], default-features = false }
+dirs = "4.0.0"
+toml = { workspace = true }
+cargo-generate = "0.18.0"
+include_dir = "0.7.2"
+tempfile = "3.3.0"
+enum-display = "0.1.3"
+lib-cargo-crate = "0.1.6"
+
+
+fluvio = { path = "../fluvio", default-features = false }
+fluvio-hub-util = { path = "../fluvio-hub-util" }
+fluvio-protocol = { path = "../fluvio-protocol", features=["record","api"] }
+fluvio-future = { workspace = true, features = ["subscriber"]}
+fluvio-smartengine = { path = "../fluvio-smartengine", features = ["transformation"] }
+fluvio-extension-common = { path = "../fluvio-extension-common", features = ["target"] }
+fluvio-smartmodule = { path = "../fluvio-smartmodule",  default-features = false }
+fluvio-controlplane-metadata = { path = "../fluvio-controlplane-metadata", features = ["smartmodule"] }
+fluvio-sc-schema = { path = "../fluvio-sc-schema" }
+fluvio-cli-common = { path = "../fluvio-cli-common", features = ["file-records"]}
+cargo-builder = { path = "../cargo-builder"}

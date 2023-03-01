@@ -11,8 +11,12 @@ description = "Used by Fluvio SmartModule"
 
 
 [lib]
+bench = false
 crate-type = ['lib']
 
+[[bench]]
+name = "bench"
+harness = false
 
 [features]
 default = ["smartmodule"]
@@ -24,10 +28,11 @@ thiserror = "1"
 eyre = { version = ">=0.6.8", default-features = false, features = [
     "auto-install",
 ] }
-fluvio-smartmodule-derive = { version = "0.2.0", path = "../fluvio-smartmodule-derive" }
+fluvio-smartmodule-derive = { version = "0.4.0", path = "../fluvio-smartmodule-derive" }
 fluvio-protocol = { path = "../fluvio-protocol", version = "0.8.0", features = [
     "link",
 ] }
 
 [dev-dependencies]
+criterion = "0.4.0"
 trybuild = { git = "https://github.com/infinyon/trybuild", branch = "check_option" }

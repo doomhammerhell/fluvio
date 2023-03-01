@@ -7,7 +7,7 @@ use fluvio_spu_schema::server::fetch_offset::FetchOffsetsRequest;
 use fluvio_spu_schema::server::fetch_offset::FetchOffsetPartitionResponse;
 
 use crate::FluvioError;
-use crate::sockets::VersionedSerialSocket;
+use fluvio_socket::VersionedSerialSocket;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum OffsetInner {
@@ -321,12 +321,12 @@ pub(crate) async fn fetch_offsets(
 
     match response.find_partition(replica) {
         Some(partition_response) => {
-            debug!("replica: {}, fetch offset: {}", replica, partition_response);
+            debug!("replica: {replica}, fetch offset: {partition_response}");
             Ok(partition_response)
         }
         None => Err(IoError::new(
             ErrorKind::InvalidData,
-            format!("no replica offset for: {}", replica),
+            format!("no replica offset for: {replica}"),
         )
         .into()),
     }

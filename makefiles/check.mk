@@ -31,13 +31,15 @@ check-crate-audit: install-deny
 	cargo deny check
 
 build_smartmodules:
-	make -C crates/fluvio-smartmodule/examples build
+	make -C smartmodule/examples build
 
 run-all-unit-test: install_rustup_target
 	cargo test --lib --all-features $(BUILD_FLAGS)
 	cargo test -p fluvio-smartmodule $(BUILD_FLAGS)
 	cargo test -p fluvio-storage $(BUILD_FLAGS)
 	cargo test -p fluvio-channel-cli $(BUILD_FLAGS)
+	cargo test -p fluvio-connector-derive $(BUILD_FLAGS)
+	cargo test -p fluvio-controlplane-metadata --features=smartmodule $(BUILD_FLAGS)
 	make test-all -C crates/fluvio-protocol
 
 run-integration-test: build_smartmodules install_rustup_target
@@ -48,7 +50,8 @@ run-integration-test: build_smartmodules install_rustup_target
 	rustup target add wasm32-wasi
 	cargo test  --features wasi -p fluvio-smartengine -- --ignored --test-threads=1
 
-
+run-smartmodule-test:	build_smartmodules
+	cargo test  -p fluvio-smartengine -- --ignored --nocapture
 
 run-k8-test:	install_rustup_target k8-setup build_k8_image
 	cargo test --lib  -p fluvio-sc  -- --ignored --test-threads=1
@@ -64,4 +67,4 @@ run-client-doc-test: install_rustup_target
 
 
 fluvio_run_bin: install_rustup_target
-	cargo build --bin fluvio-run $(RELEASE_FLAG) --target $(TARGET) $(DEBUG_SMARTMODULE_FLAG)
+	cargo build --bin fluvio-run -p fluvio-run $(RELEASE_FLAG) --target $(TARGET) $(DEBUG_SMARTMODULE_FLAG)

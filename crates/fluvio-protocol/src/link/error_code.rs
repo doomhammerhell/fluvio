@@ -140,8 +140,14 @@ pub enum ErrorCode {
     #[error("SmartModule is not a valid '{kind}' SmartModule due to {error}. Are you missing a #[smartmodule({kind})] attribute?")]
     SmartModuleInvalidExports { error: String, kind: String },
     #[fluvio(tag = 6004)]
-    #[error("SmartModule runtime error {0}")]
-    SmartModuleRuntimeError(super::smartmodule::SmartModuleRuntimeError),
+    #[error("SmartModule transform error {0}")]
+    SmartModuleRuntimeError(super::smartmodule::SmartModuleTransformRuntimeError),
+    #[fluvio(tag = 6005)]
+    #[error("Error initializing {0} SmartModule Chain")]
+    SmartModuleChainInitError(String),
+    #[fluvio(tag = 6006)]
+    #[error("SmartModule init error {0}")]
+    SmartModuleInitError(super::smartmodule::SmartModuleInitRuntimeError),
 
     // TableFormat Errors
     #[fluvio(tag = 7000)]
@@ -169,6 +175,8 @@ pub enum ErrorCode {
     DerivedStreamInvalid(String),
     #[error("can't do recursive derivedstream yet: {0}->{1}")]
     DerivedStreamRecursion(String, String),
+    #[error("the derivedstream already exists")]
+    DerivedStreamAlreadyExists,
 
     // Compression errors
     #[fluvio(tag = 9000)]
@@ -190,7 +198,7 @@ impl ErrorCode {
     pub fn to_sentence(&self) -> String {
         match self {
             ErrorCode::None => "".to_owned(),
-            _ => upper_cammel_case_to_sentence(format!("{:?}", self), true),
+            _ => upper_cammel_case_to_sentence(format!("{self:?}"), true),
         }
     }
 

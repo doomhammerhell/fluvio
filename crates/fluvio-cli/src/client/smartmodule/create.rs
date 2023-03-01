@@ -1,21 +1,16 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::io::Read;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use fluvio_extension_common::Terminal;
-use fluvio_sc_schema::smartmodule::{SmartModulePackage, SmartModuleInitType, SmartModuleInitParam};
 use tracing::debug;
+use async_trait::async_trait;
 use clap::Parser;
+use anyhow::Result;
 
 use fluvio::Fluvio;
-use fluvio::metadata::smartmodule::{SmartModuleWasm, SmartModuleSpec};
-use flate2::{Compression, bufread::GzEncoder};
-use fluvio_smartmodule_package::package::{SmartModuleMetadata, InitType};
+use fluvio_controlplane_metadata::smartmodule::{SmartModuleWasm, SmartModuleSpec};
+use fluvio_extension_common::Terminal;
 
-use crate::Result;
 use crate::client::cmd::ClientCmd;
 
 /// Create a new SmartModule with a given name
@@ -26,9 +21,6 @@ pub struct CreateSmartModuleOpt {
     /// The path to a WASM binary to create the SmartModule from
     #[clap(long)]
     wasm_file: PathBuf,
-    /// The path to the source code for the SmartModule WASM
-    #[clap(long)]
-    _source_file: Option<PathBuf>,
     #[clap(long)]
     /// The path to the SmartModule package (experimental)
     package: Option<PathBuf>,
@@ -41,15 +33,12 @@ impl ClientCmd for CreateSmartModuleOpt {
         _out: Arc<O>,
         fluvio: &Fluvio,
     ) -> Result<()> {
-        let raw = std::fs::read(self.wasm_file)?;
-        let mut encoder = GzEncoder::new(raw.as_slice(), Compression::default());
-        let mut buffer = Vec::with_capacity(raw.len());
-        encoder.read_to_end(&mut buffer)?;
         /*
             * TODO: Fix the CRD to work with this
         let buffer = vec!['a' as u8; self.size];
         */
 
+        /*
         // load package if provided
         let package_opt = if let Some(package_path) = self.package {
             let m = SmartModuleMetadata::from_file(package_path)?;
@@ -59,6 +48,7 @@ impl ClientCmd for CreateSmartModuleOpt {
                     name: m.package.name.clone(),
                     version: m.package.version.clone(),
                     group: m.package.group.clone(),
+                    ..Default::default()
                 }),
                 m.init
                     .into_iter()
@@ -77,18 +67,19 @@ impl ClientCmd for CreateSmartModuleOpt {
         } else {
             (None, BTreeMap::new())
         };
+        */
 
-        let spec: SmartModuleSpec = SmartModuleSpec {
-            wasm: SmartModuleWasm::from_binary_payload(buffer),
-            package: package_opt.0,
-            init_params: package_opt.1,
+        let raw = std::fs::read(self.wasm_file)?;
+
+        let spec = SmartModuleSpec {
+            wasm: SmartModuleWasm::from_raw_wasm_bytes(&raw)?,
             ..Default::default()
         };
 
-        debug!(name = self.name, "creating smart-module");
+        debug!(name = self.name, "creating smartmodule");
         let admin = fluvio.admin().await;
         admin.create(self.name.to_string(), false, spec).await?;
-        println!("smart-module \"{}\" has been created.", self.name);
+        println!("smartmodule \"{}\" has been created.", self.name);
 
         Ok(())
     }

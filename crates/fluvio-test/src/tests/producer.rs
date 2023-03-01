@@ -5,7 +5,6 @@ use fluvio::{RecordKey, TopicProducer};
 use fluvio_test_derive::fluvio_test;
 use fluvio_test_util::test_meta::environment::EnvironmentSetup;
 use fluvio_test_util::test_meta::{TestOption, TestCase};
-use crate::tests::TestRecordBuilder;
 use fluvio_test_util::async_process;
 //use tracing::debug;
 use hdrhistogram::Histogram;
@@ -44,13 +43,13 @@ pub struct ProducerTestOption {
     // max-throughput
 
     //// total time we want the producer to run, in seconds
-    //#[clap(long, parse(try_from_str = parse_seconds), default_value = "60")]
+    //#[clap(long, value_parser=parse_seconds, default_value = "60")]
     //runtime_seconds: Duration,
     /// Total number of records to producer
     #[clap(long, default_value = "100")]
     pub num_records: u32,
 
-    /// Size of dynamic payload portion of test record
+    /// Size of test record. This test doesn't use the TestRecord struct so this is the total size, not just the dynamic payload size
     #[clap(long, default_value = "1000")]
     pub record_size: usize,
 
@@ -90,6 +89,11 @@ async fn producer_work(
     let mut throughput_histogram = Histogram::<u64>::new(2).unwrap();
     // Eventually we'll need to store globally to calculate wrt all producers in test
 
+    // We don't do anything with the record struct so we increase the stress on the system by just sending the same data over and over again.
+    // We can only do this because we don't compress the data
+    // Otherwise, test-harness spends much of the time allocating the record
+    let record = "A".repeat(test_case.option.record_size).as_bytes().to_vec();
+
     // Loop over num_record
     for record_n in 0..workload_size {
         // This is to report the sent tag relative to the work split
@@ -100,32 +104,23 @@ async fn producer_work(
         //  Create record
         //  calculate the min latency to meet throughput requirements
         //
-        //  start time
-        //  (dynamic wait based on previous iteration)
+        //  start time=now
         //  send
-        //  end time
+        //  end time=now
         //
         //  calculate actual latency, throughput
         // }
 
-        let record = TestRecordBuilder::new()
-            .with_tag(format!("{}:{}", producer_id, record_n))
-            .with_random_data(test_case.option.record_size)
-            .build();
-        let record_json = serde_json::to_string(&record)
-            .expect("Convert record to json string failed")
-            .as_bytes()
-            .to_vec();
-        let record_size = record_json.len() as u64;
+        let record_size = record.len() as u64;
 
         //debug!("{:?}", &record);
 
         // Record the latency
         let now = SystemTime::now();
         producer
-            .send(RecordKey::NULL, record_json)
+            .send(RecordKey::NULL, record.clone())
             .await
-            .unwrap_or_else(|_| panic!("Producer {} send failed", producer_id));
+            .unwrap_or_else(|_| panic!("Producer {producer_id} send failed"));
 
         let send_latency = now.elapsed().unwrap().as_nanos() as u64;
         latency_histogram.record(send_latency).unwrap();
@@ -135,19 +130,18 @@ async fn producer_work(
         // Converting from nanoseconds to seconds, to store (bytes per second) in histogram
         let send_throughput =
             (((record_size as f32) / (send_latency as f32)) * 1_000_000_000.0) as u64;
-        throughput_histogram.record(send_throughput as u64).unwrap();
+        throughput_histogram.record(send_throughput).unwrap();
 
         if test_case.option.verbose {
             // Convert bytes per second to kilobytes per second
             let throughput_kbps = send_throughput / 1_000;
 
             println!(
-                "[producer-{}] record: {:>7} (size {:>5}) CRC: {:>10} Latency: {:>12} Throughput: {:>7?} kB/s",
+                "[producer-{}] record: {:>7} (size {:>5}) Latency: {:>12} Throughput: {:>7?} kB/s",
                 producer_id,
                 record_tag,
                 record_size,
-                record.crc,
-                format_args!("{:?}", Duration::from_nanos(send_latency)),
+                format!("{:?}", Duration::from_nanos(send_latency)),
                 throughput_kbps,
             );
         }
@@ -159,8 +153,7 @@ async fn producer_work(
     let throughput_p99 = throughput_histogram.max() / 1_000;
 
     println!(
-        "[producer-{}] Produce P99: {:?} Peak Throughput: {:?} kB/s",
-        producer_id, produce_p99, throughput_p99
+        "[producer-{producer_id}] Produce P99: {produce_p99:?} Peak Throughput: {throughput_p99:?} kB/s"
     );
 }
 
@@ -174,16 +167,13 @@ pub fn run(mut test_driver: FluvioTestDriver, mut test_case: TestCase) {
     let producers = if total_records > test_case.option.producers {
         test_case.option.producers
     } else {
-        println!(
-            "More producers than records to split. Reducing number to {}",
-            total_records
-        );
+        println!("More producers than records to split. Reducing number to {total_records}");
         total_records
     };
 
     println!("\nStarting Producer test");
-    println!("Producers: {}", producers);
-    println!("# Records: {}", total_records);
+    println!("Producers: {producers}");
+    println!("# Records: {total_records}");
 
     // Divide work up amongst the total number of producers
     let record_producer_modulo = total_records % producers;
@@ -198,7 +188,7 @@ pub fn run(mut test_driver: FluvioTestDriver, mut test_case: TestCase) {
     // Spawn the producers
     let mut producer_wait = Vec::new();
     for n in 0..producers {
-        println!("Starting Producer #{}", n);
+        println!("Starting Producer #{n}");
 
         let producer = async_process!(
             async {
@@ -233,14 +223,13 @@ pub fn run(mut test_driver: FluvioTestDriver, mut test_case: TestCase) {
                 )
                 .await
             },
-            format!("producer-{}", n)
+            format!("producer-{n}")
         );
 
         producer_wait.push(producer);
     }
 
-    let _: Vec<_> = producer_wait
-        .into_iter()
-        .map(|p| p.join().expect("Producer thread fail"))
-        .collect();
+    for p in producer_wait {
+        p.join().expect("Producer thread fail")
+    }
 }

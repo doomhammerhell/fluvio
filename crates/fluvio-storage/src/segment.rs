@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tracing::{debug, trace, instrument, info, error};
+use anyhow::{Result};
 
 use fluvio_future::fs::remove_file;
 use fluvio_future::file_slice::AsyncFileSlice;
@@ -12,7 +13,7 @@ use fluvio_protocol::record::{Batch, BatchRecords};
 use fluvio_protocol::record::{Offset, Size, Size64};
 use fluvio_protocol::link::ErrorCode;
 
-use crate::batch_header::{BatchHeaderStream, BatchHeaderPos};
+use crate::batch_header::{BatchHeaderStream, FileEmptyRecords};
 use crate::mut_index::MutLogIndex;
 use crate::index::LogIndex;
 use crate::index::Index;
@@ -20,13 +21,18 @@ use crate::records::FileRecords;
 use crate::mut_records::MutFileRecords;
 use crate::records::FileRecordsSlice;
 use crate::config::{SharedReplicaConfig};
-use crate::validator::LogValidationError;
 use crate::StorageError;
-use crate::batch::FileBatchStream;
+use crate::batch::{FileBatchStream};
 use crate::index::OffsetPosition;
+use crate::validator::LogValidationError;
 
 pub type MutableSegment = Segment<MutLogIndex, MutFileRecords>;
 pub type ReadSegment = Segment<LogIndex, FileRecordsSlice>;
+
+pub(crate) struct BatchPosition {
+    batch: Batch<FileEmptyRecords>,
+    pos: Size,
+}
 
 /// Segment contains both message log and index
 pub struct Segment<I, L> {
@@ -115,56 +121,50 @@ where
         match self
             .find_offset_position(start_offset)
             .await
-            .map_err(|err| ErrorCode::Other(format!("offset error: {:#?}", err)))?
+            .map_err(|err| ErrorCode::Other(format!("offset error: {err:#?}")))?
         {
             Some(start_pos) => {
+                let batch = start_pos.batch;
+                let pos = start_pos.pos;
                 debug!(
-                    batch_offset = start_pos.get_batch().base_offset,
-                    batch_len = start_pos.get_batch().batch_len,
-                    pos = start_pos.get_pos(),
+                    batch_offset = batch.base_offset,
+                    batch_len = batch.batch_len,
                     "found start pos",
                 );
                 match max_offset_opt {
                     Some(max_offset) => {
+                        // max_offset comes from HW, which could be greater than current segment end.
+                        let effective_max_offset = std::cmp::min(max_offset, self.get_end_offset());
                         // check if max offset same as segment end
-                        if max_offset == self.get_end_offset() {
-                            debug!("max offset is same as end offset, reading to end");
-                            Ok(Some(
-                                self.msg_log
-                                    .as_file_slice(start_pos.get_pos())
-                                    .map_err(|err| {
-                                        ErrorCode::Other(format!("msg as file slice: {:#?}", err))
-                                    })?,
-                            ))
+                        if effective_max_offset == self.get_end_offset() {
+                            debug!("effective max offset is same as end offset, reading to end");
+                            Ok(Some(self.msg_log.as_file_slice(pos).map_err(|err| {
+                                ErrorCode::Other(format!("msg as file slice: {err:#?}"))
+                            })?))
                         } else {
-                            debug!(max_offset);
-                            match self.find_offset_position(max_offset).await.map_err(|err| {
-                                ErrorCode::Other(format!("offset error: {:#?}", err))
-                            })? {
+                            debug!(effective_max_offset, max_offset);
+                            match self
+                                .find_offset_position(effective_max_offset)
+                                .await
+                                .map_err(|err| {
+                                    ErrorCode::Other(format!("offset error: {err:#?}"))
+                                })? {
                                 Some(end_pos) => Ok(Some(
                                     self.msg_log
-                                        .as_file_slice_from_to(
-                                            start_pos.get_pos(),
-                                            end_pos.get_pos() - start_pos.get_pos(),
-                                        )
+                                        .as_file_slice_from_to(pos, end_pos.pos - pos)
                                         .map_err(|err| {
-                                            ErrorCode::Other(format!("msg slice: {:#?}", err))
+                                            ErrorCode::Other(format!("msg slice: {err:#?}"))
                                         })?,
                                 )),
                                 None => Err(ErrorCode::Other(format!(
-                                    "max offset position: {} not found",
-                                    max_offset
+                                    "max offset position: {effective_max_offset} not found"
                                 ))),
                             }
                         }
                     }
-                    None => Ok(Some(
-                        self.msg_log
-                            .as_file_slice(start_pos.get_pos())
-                            .map_err(|err| {
-                                ErrorCode::Other(format!("msg slice error: {:#?}", err))
-                            })?,
-                    )),
+                    None => Ok(Some(self.msg_log.as_file_slice(start_pos.pos).map_err(
+                        |err| ErrorCode::Other(format!("msg slice error: {err:#?}")),
+                    )?)),
                 }
             }
             None => {
@@ -179,7 +179,7 @@ where
     pub(crate) async fn find_offset_position(
         &self,
         offset: Offset,
-    ) -> Result<Option<BatchHeaderPos>, StorageError> {
+    ) -> Result<Option<BatchPosition>> {
         debug!(offset, "trying to find offset position");
         if offset < self.base_offset {
             debug!(self.base_offset, "invalid, offset is less than base offset",);
@@ -204,27 +204,30 @@ where
         debug!(file_position = position, "found file pos");
 
         let mut header_stream = self.open_batch_header_stream(position).await?;
-        while let Some(batch_pos) = header_stream.next().await {
+        while let Some(batch_pos) = header_stream.try_next().await? {
+            let pos = batch_pos.get_pos();
+            let batch = batch_pos.inner();
+
             trace!(
-                pos = batch_pos.get_pos(),
-                base_offset = batch_pos.get_batch().base_offset,
-                batch_len = batch_pos.get_batch().batch_len,
-                last_offset = batch_pos.get_batch().get_last_offset(),
+                base_offset = batch.base_offset,
+                batch_len = batch.batch_len,
+                last_offset = batch.get_last_offset(),
                 "batch_pos"
             );
-            let last_offset = batch_pos.get_batch().get_last_offset();
+            let last_offset = batch.get_last_offset();
             if last_offset >= offset {
                 debug!(last_offset, "found batch last offset");
-                return Ok(Some(batch_pos));
+                return Ok(Some(BatchPosition { batch, pos }));
             } else {
                 trace!(last_offset, "skipping batch end offset");
             }
         }
+
         Ok(None)
     }
 
     pub(crate) fn occupied_memory(&self) -> Size64 {
-        self.index.len() as u64 + self.msg_log.len()
+        self.index.len() + self.msg_log.len()
     }
 }
 
@@ -234,7 +237,7 @@ impl Segment<LogIndex, FileRecordsSlice> {
         base_offset: Offset,
         end_offset: Offset,
         option: Arc<SharedReplicaConfig>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self> {
         debug!(base_offset, end_offset, ?option, "open for read");
         let msg_log = FileRecordsSlice::open(base_offset, option.clone()).await?;
         let base_offset = msg_log.get_base_offset();
@@ -255,44 +258,30 @@ impl Segment<LogIndex, FileRecordsSlice> {
     pub async fn open_unknown(
         base_offset: Offset,
         option: Arc<SharedReplicaConfig>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self> {
         let msg_log = FileRecordsSlice::open(base_offset, option.clone()).await?;
         let index = LogIndex::open_from_offset(base_offset, option.clone()).await?;
         let base_offset = msg_log.get_base_offset();
-        let end_offset = msg_log.validate(&index, false, false).await?;
-        match msg_log.validate(&index, false, false).await {
-            Ok(end_offset) => {
-                debug!(end_offset, base_offset, "base offset from msg_log");
+        match msg_log.validate(&index).await {
+            Ok(val) => {
+                // check if validation is successful
+                if let Some(err) = val.error {
+                    error!(err = ?err, "segment validation failed");
+                    return Err(err.into());
+                }
+
+                info!(end_offset = val.leo(), base_offset = val.base_offset, time_ms = %val.duration.as_millis(), "segment validated");
                 Ok(Segment {
                     msg_log,
                     index,
                     option,
                     base_offset,
-                    end_offset,
-                })
-            }
-            Err(LogValidationError::InvalidIndex {
-                offset,
-                batch_file_pos,
-                index_position,
-                diff_position,
-            }) => {
-                error!(
-                    offset,
-                    batch_file_pos, index_position, diff_position, "invalid index, rebuilding"
-                );
-                //  let index = msg_log.generate_index().await?;
-                Ok(Segment {
-                    msg_log,
-                    index,
-                    option,
-                    base_offset,
-                    end_offset,
+                    end_offset: val.leo(),
                 })
             }
             Err(err) => {
-                error!(?err, "validation error");
-                Err(err.into())
+                error!(?err, "segment validation encountered fail error");
+                Err(err)
             }
         }
     }
@@ -360,16 +349,33 @@ impl Segment<MutLogIndex, MutFileRecords> {
         self.msg_log.get_pos()
     }
 
-    /// validate the segment and load last offset
-    pub async fn validate(
-        &mut self,
-        skip_errors: bool,
-        verbose: bool,
-    ) -> Result<Offset, StorageError> {
-        self.end_offset = self
-            .msg_log
-            .validate(&self.index, skip_errors, verbose)
-            .await?;
+    /// validate and repair if necessary
+    pub async fn validate_and_repair(&mut self) -> Result<Offset> {
+        let validation = self.msg_log.validate(&self.index).await?;
+        let leo = validation.leo();
+        // check for error and see if it's recoverable
+        if let Some(err) = validation.error {
+            error!(err = ?err, "log validation failed");
+            match err {
+                LogValidationError::BatchDecoding(_header_error) => {
+                    info!(
+                        len = validation.last_valid_file_pos,
+                        "batch decoding error, trying to recover"
+                    );
+                    // for decoding batch error, we can readjust
+                    self.msg_log.set_len(validation.last_valid_file_pos).await?;
+                    info!(
+                        len = validation.last_valid_file_pos,
+                        "readjust segment length"
+                    );
+                }
+                _ => {
+                    // for other error, we can't recover
+                    return Err(err.into());
+                }
+            }
+        }
+        self.end_offset = leo;
         Ok(self.end_offset)
     }
 
@@ -386,13 +392,13 @@ impl Segment<MutLogIndex, MutFileRecords> {
 
     /// convert to immutable segment
     #[allow(clippy::wrong_self_convention)]
-    pub async fn as_segment(self) -> Result<ReadSegment, StorageError> {
+    pub async fn as_segment(self) -> Result<ReadSegment> {
         Segment::open_for_read(self.get_base_offset(), self.end_offset, self.option.clone()).await
     }
 
     /// use only in test
     #[cfg(test)]
-    pub async fn convert_to_segment(mut self) -> Result<ReadSegment, StorageError> {
+    pub async fn convert_to_segment(mut self) -> Result<ReadSegment> {
         self.shrink_index().await?;
         Segment::open_for_read(self.get_base_offset(), self.end_offset, self.option.clone()).await
     }
@@ -403,14 +409,11 @@ impl Segment<MutLogIndex, MutFileRecords> {
     /// 2. Append batch to msg log
     /// 3. Write batch location to index
     #[instrument(skip(batch))]
-    pub async fn append_batch<R: BatchRecords>(
-        &mut self,
-        batch: &mut Batch<R>,
-    ) -> Result<bool, StorageError> {
+    pub async fn append_batch<R: BatchRecords>(&mut self, batch: &mut Batch<R>) -> Result<bool> {
         // adjust base offset and offset delta
         // reject if batch len is 0
         if batch.records_len() == 0 {
-            return Err(StorageError::EmptyBatch);
+            return Err(StorageError::EmptyBatch.into());
         }
 
         batch.set_base_offset(self.end_offset);
@@ -515,7 +518,7 @@ mod tests {
         assert_eq!(active_segment.get_end_offset(), 21);
 
         // check to see if batch is written
-        let bytes = read_bytes_from_file(&test_dir.join(TEST_FILE_NAME)).expect("read bytes");
+        let bytes = read_bytes_from_file(test_dir.join(TEST_FILE_NAME)).expect("read bytes");
         debug!("read {} bytes", bytes.len());
 
         // read batches from raw bytes to see if it can be parsed
@@ -536,9 +539,9 @@ mod tests {
         .is_none());
         let offset_position =
             (active_segment.find_offset_position(20).await.expect("find")).expect("offset exists");
-        assert_eq!(offset_position.get_batch().get_base_offset(), 20);
-        assert_eq!(offset_position.get_pos(), 0); //
-        assert_eq!(offset_position.len(), 58);
+        assert_eq!(offset_position.batch.get_base_offset(), 20);
+        assert_eq!(offset_position.pos, 0); //
+        assert_eq!(offset_position.batch.batch_len, 58);
         assert!((active_segment.find_offset_position(30).await.expect("find")).is_none());
     }
 
@@ -563,7 +566,7 @@ mod tests {
         // each record contains 9 bytes
 
         // check to see if batch is written
-        let bytes = read_bytes_from_file(&test_dir.join(TEST_FILE_NAME)).expect("read");
+        let bytes = read_bytes_from_file(test_dir.join(TEST_FILE_NAME)).expect("read");
         debug!("read {} bytes", bytes.len());
 
         let batch =
@@ -578,9 +581,9 @@ mod tests {
         assert!((active_segment.find_offset_position(10).await.expect("find")).is_none());
         let offset_position =
             (active_segment.find_offset_position(20).await.expect("find")).expect("offset exists");
-        assert_eq!(offset_position.get_batch().get_base_offset(), 20);
-        assert_eq!(offset_position.get_pos(), 0); //
-        assert_eq!(offset_position.len(), 85);
+        assert_eq!(offset_position.batch.get_base_offset(), 20);
+        assert_eq!(offset_position.pos, 0); //
+        assert_eq!(offset_position.batch.batch_len, 85);
         assert!((active_segment.find_offset_position(30).await.expect("find")).is_none());
     }
 
@@ -618,7 +621,7 @@ mod tests {
         let index = seg_sink.get_index();
         assert_eq!(index[0].to_be(), (2, 79));
 
-        let bytes = read_bytes_from_file(&test_dir.join(TEST2_FILE_NAME)).expect("read");
+        let bytes = read_bytes_from_file(test_dir.join(TEST2_FILE_NAME)).expect("read");
         debug!("read {} bytes", bytes.len());
 
         let cursor = &mut Cursor::new(bytes);
@@ -635,26 +638,26 @@ mod tests {
             .await
             .expect("pos")
             .unwrap();
-        assert_eq!(offset_pos1.get_batch().get_base_offset(), 40);
-        assert_eq!(offset_pos1.get_pos(), 0);
-        assert_eq!(offset_pos1.len(), 67);
+        assert_eq!(offset_pos1.batch.get_base_offset(), 40);
+        assert_eq!(offset_pos1.pos, 0);
+        assert_eq!(offset_pos1.batch.batch_len, 67);
         let offset_pos2 = seg_sink
             .find_offset_position(42)
             .await
             .expect("pos")
             .unwrap();
-        assert_eq!(offset_pos2.get_batch().get_base_offset(), 42);
-        assert_eq!(offset_pos2.get_pos(), 79);
-        assert_eq!(offset_pos2.len(), 67);
+        assert_eq!(offset_pos2.batch.get_base_offset(), 42);
+        assert_eq!(offset_pos2.pos, 79);
+        assert_eq!(offset_pos2.batch.batch_len, 67);
 
         let offset_pos3 = seg_sink
             .find_offset_position(44)
             .await
             .expect("pos")
             .unwrap();
-        assert_eq!(offset_pos3.get_batch().get_base_offset(), 44);
-        assert_eq!(offset_pos3.get_pos(), 158);
-        assert_eq!(offset_pos3.len(), 67);
+        assert_eq!(offset_pos3.batch.get_base_offset(), 44);
+        assert_eq!(offset_pos3.pos, 158);
+        assert_eq!(offset_pos3.batch.batch_len, 67);
 
         // test whether you can send batch with zero
         assert_eq!(seg_sink.get_end_offset(), 46);
@@ -668,5 +671,13 @@ mod tests {
         next_batch.base_offset = 1000;
         assert!(seg_sink.append_batch(&mut next_batch).await.is_ok());
         assert_eq!(seg_sink.get_end_offset(), 50);
+
+        let _records = seg_sink
+            .records_slice(44, Some(52))
+            .await
+            .expect(
+                "failed to get records using max offset larger than current end offset in segment",
+            )
+            .expect("failed to get records");
     }
 }

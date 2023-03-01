@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use clap::ArgEnum;
+use clap::ValueEnum;
 use clap::Parser;
 use semver::Version;
 use tracing::debug;
@@ -13,6 +13,8 @@ mod util;
 mod check;
 mod error;
 mod diagnostics;
+mod status;
+mod shutdown;
 
 use start::StartOpt;
 use start::UpgradeOpt;
@@ -21,8 +23,12 @@ use check::CheckOpt;
 use group::SpuGroupCmd;
 use spu::SpuCmd;
 use diagnostics::DiagnosticsOpt;
+use status::StatusOpt;
+use shutdown::ShutdownOpt;
 
 pub use self::error::ClusterCliError;
+
+use anyhow::Result;
 
 use fluvio_extension_common as common;
 use common::target::ClusterTarget;
@@ -73,6 +79,14 @@ pub enum ClusterCmd {
     /// Collect anonymous diagnostic information to help with debugging
     #[clap(name = "diagnostics")]
     Diagnostics(DiagnosticsOpt),
+
+    /// Check the status of a Fluvio cluster
+    #[clap(name = "status")]
+    Status(StatusOpt),
+
+    /// Shutdown cluster processes without deleting data
+    #[clap(name = "shutdown")]
+    Shutdown(ShutdownOpt),
 }
 
 impl ClusterCmd {
@@ -82,7 +96,7 @@ impl ClusterCmd {
         out: Arc<O>,
         platform_version: Version,
         target: ClusterTarget,
-    ) -> Result<(), ClusterCliError> {
+    ) -> Result<()> {
         match self {
             Self::Start(mut start) => {
                 if let Ok(tag_strategy_value) = std::env::var(FLUVIO_IMAGE_TAG_STRATEGY) {
@@ -137,6 +151,12 @@ impl ClusterCmd {
                 group.process(out, &fluvio).await?;
             }
             Self::Diagnostics(opt) => {
+                opt.process().await?;
+            }
+            Self::Status(status) => {
+                status.process(target).await?;
+            }
+            Self::Shutdown(opt) => {
                 opt.process().await?;
             }
         }

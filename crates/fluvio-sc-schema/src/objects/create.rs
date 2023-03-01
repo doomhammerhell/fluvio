@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use fluvio_protocol::bytes::{BufMut, Buf};
 use fluvio_protocol::{Encoder, Decoder};
 use fluvio_protocol::api::Request;
-use fluvio_controlplane_metadata::derivedstream::DerivedStreamSpec;
 use fluvio_protocol::Version;
 
 use crate::topic::TopicSpec;
@@ -13,7 +12,6 @@ use crate::customspu::CustomSpuSpec;
 use crate::smartmodule::SmartModuleSpec;
 use crate::tableformat::TableFormatSpec;
 use crate::spg::SpuGroupSpec;
-use crate::connector::ManagedConnectorSpec;
 
 use crate::{AdminPublicApiKey, CreatableAdminSpec, Status};
 
@@ -33,7 +31,8 @@ pub struct CommonCreateRequest {
 
 impl Request for ObjectApiCreateRequest {
     const API_KEY: u16 = AdminPublicApiKey::Create as u16;
-    const DEFAULT_API_VERSION: i16 = 9;
+    const MIN_API_VERSION: i16 = 9;
+    const DEFAULT_API_VERSION: i16 = COMMON_VERSION;
     type Response = Status;
 }
 
@@ -48,10 +47,8 @@ pub enum ObjectCreateRequest {
     Topic(TopicSpec),
     CustomSpu(CustomSpuSpec),
     SmartModule(SmartModuleSpec),
-    ManagedConnector(ManagedConnectorSpec),
     SpuGroup(SpuGroupSpec),
     TableFormat(TableFormatSpec),
-    DerivedStream(DerivedStreamSpec),
 }
 
 impl Default for ObjectCreateRequest {
@@ -66,10 +63,8 @@ impl ObjectCreateRequest {
             Self::Topic(_) => TopicSpec::CREATE_TYPE,
             Self::CustomSpu(_) => CustomSpuSpec::CREATE_TYPE,
             Self::SmartModule(_) => SmartModuleSpec::CREATE_TYPE,
-            Self::ManagedConnector(_) => ManagedConnectorSpec::CREATE_TYPE,
             Self::SpuGroup(_) => SpuGroupSpec::CREATE_TYPE,
             Self::TableFormat(_) => TableFormatSpec::CREATE_TYPE,
-            Self::DerivedStream(_) => DerivedStreamSpec::CREATE_TYPE,
         }
     }
 }
@@ -83,10 +78,8 @@ impl Encoder for ObjectCreateRequest {
                 Self::Topic(s) => s.write_size(version),
                 Self::CustomSpu(s) => s.write_size(version),
                 Self::SmartModule(s) => s.write_size(version),
-                Self::ManagedConnector(s) => s.write_size(version),
                 Self::SpuGroup(s) => s.write_size(version),
                 Self::TableFormat(s) => s.write_size(version),
-                Self::DerivedStream(s) => s.write_size(version),
             }
     }
 
@@ -98,11 +91,9 @@ impl Encoder for ObjectCreateRequest {
         match self {
             Self::Topic(s) => s.encode(dest, version)?,
             Self::CustomSpu(s) => s.encode(dest, version)?,
-            Self::ManagedConnector(s) => s.encode(dest, version)?,
             Self::SmartModule(s) => s.encode(dest, version)?,
             Self::SpuGroup(s) => s.encode(dest, version)?,
             Self::TableFormat(s) => s.encode(dest, version)?,
-            Self::DerivedStream(s) => s.encode(dest, version)?,
         }
 
         Ok(())
@@ -162,26 +153,10 @@ impl Decoder for ObjectCreateRequest {
                 Ok(())
             }
 
-            ManagedConnectorSpec::CREATE_TYPE => {
-                tracing::trace!("detected connector");
-                let mut request = ManagedConnectorSpec::default();
-                request.decode(src, version)?;
-                *self = Self::ManagedConnector(request);
-                Ok(())
-            }
-
-            DerivedStreamSpec::CREATE_TYPE => {
-                tracing::trace!("detected derivedstream");
-                let mut request = DerivedStreamSpec::default();
-                request.decode(src, version)?;
-                *self = Self::DerivedStream(request);
-                Ok(())
-            }
-
             // Unexpected type
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("invalid create type {:#?}", typ),
+                format!("invalid create type {typ:#?}"),
             )),
         }
     }
@@ -213,3 +188,5 @@ macro_rules! CreateFrom {
 }
 
 pub(crate) use CreateFrom;
+
+use super::COMMON_VERSION;

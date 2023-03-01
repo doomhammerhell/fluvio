@@ -30,6 +30,8 @@ TEST_ARG_COMMON = ${TEST_ARG_SPU} \
                 ${TEST_ARG_DEVELOP} \
                 ${TEST_ARG_EXTRA}
 
+
+
 ifeq ($(UNINSTALL),noclean)
 clean_cluster:
 	echo "no clean"
@@ -40,6 +42,18 @@ clean_cluster:
 endif
 
 test-setup:	build-test-ci clean_cluster
+
+
+
+validate-test-harness: test-setup
+	$(TEST_BIN) expected_pass ${TEST_ARG_EXTRA}
+	$(TEST_BIN) expected_fail --expect-fail
+	$(TEST_BIN) expected_fail_join_fail_first --expect-fail
+	$(TEST_BIN) expected_fail_join_success_first --expect-fail
+	$(TEST_BIN) expected_timeout --timeout 5sec --expect-timeout
+
+validate-test-harness-local: TEST_ARG_EXTRA=--local  --cluster-start
+validate-test-harness-local: validate-test-harness
 
 # To run a smoke test locally: make smoke-test-local EXTRA_ARG=--cluster-start
 smoke-test: test-setup
@@ -79,14 +93,14 @@ smoke-test-at-most-once: TEST_ARG_EXTRA=--producer-delivery-semantic at-most-onc
 smoke-test-at-most-once: smoke-test
 
 # election test only runs on local
-election-test: TEST_ARG_EXTRA=--local $(EXTRA_ARG)	
+election-test: TEST_ARG_EXTRA=--local $(EXTRA_ARG)
 election-test: test-setup
 	$(TEST_BIN) election  ${TEST_ARG_COMMON}
 
 multiple-partition-test: TEST_ARG_EXTRA=--local $(EXTRA_ARG)
 multiple-partition-test: test-setup
 	$(TEST_BIN) multiple_partition --partition 10 \
-		
+
 
 batch-failure-test: TEST_ARG_EXTRA=--local $(EXTRA_ARG)
 batch-failure-test: FLV_SOCKET_WAIT=25
@@ -126,12 +140,10 @@ test-permission-user1:
 # Kubernetes Tests
 
 smoke-test-k8: TEST_ARG_EXTRA=$(EXTRA_ARG)
-# smoke-test-k8: TEST_ARG_CONNECTOR_CONFIG=--connector-config ./tests/test-connector-config.yaml
 smoke-test-k8: TEST_ARG_TABLE_FORMAT_CONFIG=--table-format-config ./tests/test-table-format-config.yaml
-smoke-test-k8: build_k8_image smoke-test 
+smoke-test-k8: build_k8_image smoke-test
 
 smoke-test-k8-tls: TEST_ARG_EXTRA=--tls $(EXTRA_ARG)
-# smoke-test-k8-tls: TEST_ARG_CONNECTOR_CONFIG=--connector-config ./tests/test-connector-config.yaml
 smoke-test-k8-tls: TEST_ARG_TABLE_FORMAT_CONFIG=--table-format-config ./tests/test-table-format-config.yaml
 smoke-test-k8-tls: build_k8_image smoke-test
 
@@ -140,7 +152,6 @@ smoke-test-k8-tls-policy-setup:
 	kubectl create configmap authorization --from-file=POLICY=${SC_AUTH_CONFIG}/policy.json --from-file=SCOPES=${SC_AUTH_CONFIG}/scopes.json
 smoke-test-k8-tls-policy: TEST_ENV_FLV_SPU_DELAY=FLV_SPU_DELAY=$(SPU_DELAY)
 smoke-test-k8-tls-policy: TEST_ARG_EXTRA=--tls --authorization-config-map authorization $(EXTRA_ARG)
-# smoke-test-k8-tls-policy: TEST_ARG_CONNECTOR_CONFIG=--connector-config ./tests/test-connector-config.yaml
 smoke-test-k8-tls-policy: TEST_ARG_TABLE_FORMAT_CONFIG=--table-format-config ./tests/test-table-format-config.yaml
 smoke-test-k8-tls-policy: build_k8_image smoke-test
 
@@ -175,36 +186,47 @@ validate-release-stable:
 ifeq (${CI},true)
 # In CI, we expect all artifacts to already be built and loaded for the script
 longevity-test:
-	$(TEST_BIN) longevity -- --runtime-seconds=1800 --producers 10 --consumers 10
+	$(TEST_BIN) longevity --expect-timeout -- --runtime-seconds=1800 --producers 10 --consumers 10
 else
 # When not in CI (i.e. development), load the dev k8 image before running test
 longevity-test: build-test
-	$(TEST_BIN) longevity -- $(VERBOSE_FLAG) --runtime-seconds=60
+	$(TEST_BIN) longevity --expect-timeout -- $(VERBOSE_FLAG) --runtime-seconds=60
 endif
 
 cli-platform-cross-version-test:
 	bats -t ./tests/cli/cli-platform-cross-version.bats
 
-cli-smoke:
-	bats $(shell ls -1 ./tests/cli/smoke_tests/*.bats | sort -R)
-	bats ./tests/cli/smoke_tests/non-concurrent/cluster-delete.bats
+cli-fluvio-smoke:
+	bats $(shell ls -1 ./tests/cli/fluvio_smoke_tests/*.bats | sort -R)
+	bats ./tests/cli/fluvio_smoke_tests/non-concurrent/cluster-delete.bats
+
+cli-smdk-smoke:
+	bats $(shell ls -1 ./tests/cli/smdk_smoke_tests/*.bats | sort -R)
+
+cli-cdk-smoke:
+	bats $(shell ls -1 ./tests/cli/cdk_smoke_tests/*.bats | sort -R)
 
 cli-basic-test:
-	bats ./tests/cli/smoke_tests/e2e-basic.bats
+	bats ./tests/cli/fluvio_smoke_tests/e2e-basic.bats
 
 cli-smartmodule-all-test:
-	bats  ./tests/cli/smoke_tests/e2e-smartmodule-basic.bats
-	
+	bats  ./tests/cli/fluvio_smoke_tests/e2e-smartmodule-basic.bats
+
 cli-smartmodule-aggregate-test:
-	bats  -f aggregate  ./tests/cli/smoke_tests/e2e-smartmodule-basic.bats
+	bats  -f aggregate  ./tests/cli/fluvio_smoke_tests/e2e-smartmodule-basic.bats
 
 
 cli-smartmodule-basic-test:
-	bats   ./tests/cli/smoke_tests/smart-module-basic.bats
+	bats   ./tests/cli/fluvio_smoke_tests/smartmodule-basic.bats
 
 stats-test:
 	$(TEST_BIN) stats -- $(VERBOSE_FLAG) --tolerance=5
 
+cli-smdk-basic-test:
+	SMDK_BIN=$(shell readlink -f $(SMDK_BIN)) bats   ./tests/cli/smdk_smoke_tests/smdk-basic.bats
+
+cli-cdk-basic-test:
+	CDK_BIN=$(shell readlink -f $(CDK_BIN)) bats   ./tests/cli/cdk_smoke_tests/cdk-basic.bats
 
 # test rbac
 #

@@ -5,13 +5,13 @@
 //!
 
 use std::path::PathBuf;
+
 use clap::Parser;
 use tracing::debug;
+use anyhow::Result;
 
 use fluvio::Fluvio;
 use fluvio::metadata::tableformat::TableFormatSpec;
-
-use crate::CliError;
 
 use super::TableFormatConfig;
 
@@ -22,12 +22,12 @@ use super::TableFormatConfig;
 #[derive(Debug, Parser, Default)]
 pub struct CreateTableFormatOpt {
     /// The path to the TableFormat config
-    #[clap(short, long, parse(from_os_str))]
+    #[clap(short, long, value_parser)]
     pub config: PathBuf,
 }
 
 impl CreateTableFormatOpt {
-    pub async fn process(self, fluvio: &Fluvio) -> Result<(), CliError> {
+    pub async fn process(self, fluvio: &Fluvio) -> Result<()> {
         let config = TableFormatConfig::from_file(self.config)?;
         let tableformat_spec: TableFormatSpec = config.into();
         let name = tableformat_spec.name.clone();

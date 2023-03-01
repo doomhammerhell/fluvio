@@ -54,8 +54,7 @@ impl NamedProp {
 
         if let Some(max) = self.attrs.max_version {
             quote! {
-                #[allow(clippy::double_comparisons)]
-                if version >= #min && version <= #max {
+                if (#min..=#max).contains(&version) {
                     #field_stream
                 } else {
                     tracing::trace!("Field: <{}> is skipped because version: {} is outside min: {}, max: {}",stringify!(#field_name),version,#min,#max);
@@ -93,8 +92,7 @@ impl UnnamedProp {
 
         if let Some(max) = self.attrs.max_version {
             quote! {
-                #[allow(clippy::double_comparisons)]
-                if version >= #min && version <= #max {
+                if (#min..=#max).contains(&version) {
                     #field_stream
                 } else {
                     tracing::trace!("Field from tuple struct:is skipped because version: {} is outside min: {}, max: {}",version,#min,#max);
@@ -116,18 +114,16 @@ pub fn validate_versions(min: i16, max: Option<i16>, field: Option<&str>) -> Opt
     match (max, field) {
         // Print name in named fields
         (Some(max), Some(field)) if min > max => Some(format!(
-            "On {}, max version({}) is less than min({}).",
-            field, max, min
+            "On {field}, max version({max}) is less than min({min})."
         )),
         // No name to print in unnamed fields
         (Some(max), None) if min > max => {
-            Some(format!("Max version({}) is less than min({}).", max, min))
+            Some(format!("Max version({max}) is less than min({min})."))
         }
-        (None, Some(field)) if min < 0 => Some(format!(
-            "On {} min version({}) must be positive.",
-            field, min
-        )),
-        (None, None) if min < 0 => Some(format!("Min version({}) must be positive.", min)),
+        (None, Some(field)) if min < 0 => {
+            Some(format!("On {field} min version({min}) must be positive."))
+        }
+        (None, None) if min < 0 => Some(format!("Min version({min}) must be positive.")),
         _ => None,
     }
 }

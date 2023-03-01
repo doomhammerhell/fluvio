@@ -118,21 +118,22 @@ impl SpuGroupObj {
             }
         };
 
-        let full_group_name = format!("fluvio-spg-{}", self.key());
-        let full_spu_name = format!("fluvio-spg-{}", spu_name);
+        let ns = self.ctx().item().namespace();
+        let private_svc_fqdn = format!("fluvio-spg-{}.{ns}.svc.cluster.local", self.key(),);
+        let public_svc_fqdn = format!("fluvio-spu-{spu_name}.{ns}.svc.cluster.local");
 
         let spu_spec = SpuSpec {
             id: spu_id,
             spu_type: SpuType::Managed,
             public_endpoint,
             private_endpoint: Endpoint {
-                host: format!("{}.{}", full_spu_name, full_group_name),
+                host: private_svc_fqdn,
                 port: spu_private_ep.port,
                 encryption: spu_private_ep.encryption,
             },
             rack: None,
             public_endpoint_local: Some(Endpoint {
-                host: format!("{}.{}", full_spu_name, full_group_name),
+                host: public_svc_fqdn,
                 port: spu_public_ep.port,
                 encryption: spu_public_ep.encryption,
             }),
@@ -186,6 +187,7 @@ mod k8_convert {
     };
     use fluvio_types::defaults::{
         SPU_DEFAULT_NAME, SPU_PUBLIC_PORT, SPU_PRIVATE_PORT, SC_PRIVATE_PORT, PRODUCT_NAME,
+        TLS_SERVER_SECRET_NAME,
     };
 
     use crate::stores::spg::SpuGroupSpec;
@@ -218,14 +220,24 @@ mod k8_convert {
         // storage is special because defaults are explicit.
         let storage = spu_template.real_storage_config();
         let size = storage.size;
+
+        let spu_pod_config = &spu_k8_config.spu_pod_config;
+
         let mut env = vec![
             Env::key_field_ref("SPU_INDEX", "metadata.name"),
             Env::key_value("SPU_MIN", &format!("{}", spg_spec.min_id)),
         ];
 
+        // add RUST LOG, if passed
+        if let Ok(rust_log) = std::env::var("RUST_LOG") {
+            env.push(Env::key_value("RUST_LOG", &rust_log));
+        }
+
+        env.append(&mut spu_pod_config.extra_env.clone());
+
         let mut volume_mounts = vec![VolumeMount {
             name: "data".to_owned(),
-            mount_path: format!("/var/lib/{}/data", PRODUCT_NAME),
+            mount_path: format!("/var/lib/{PRODUCT_NAME}/data"),
             ..Default::default()
         }];
 
@@ -235,10 +247,7 @@ mod k8_convert {
             "/fluvio-run".to_owned(),
             "spu".to_owned(),
             "--sc-addr".to_owned(),
-            format!(
-                "fluvio-sc-internal.{}.svc.cluster.local:{}",
-                namespace, SC_PRIVATE_PORT
-            ),
+            format!("fluvio-sc-internal.{namespace}.svc.cluster.local:{SC_PRIVATE_PORT}"),
             "--log-base-dir".to_owned(),
             storage.log_dir,
             "--log-size".to_owned(),
@@ -282,7 +291,10 @@ mod k8_convert {
             volumes.push(VolumeSpec {
                 name: "tls".to_owned(),
                 secret: Some(SecretVolumeSpec {
-                    secret_name: "fluvio-tls".to_owned(), // fixed
+                    secret_name: tls
+                        .secret_name
+                        .clone()
+                        .unwrap_or_else(|| TLS_SERVER_SECRET_NAME.to_string()),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -292,14 +304,21 @@ mod k8_convert {
             args.push("0.0.0.0:9007".to_owned());
         }
 
-        // add RUST LOG, if passed
-        if let Ok(rust_log) = std::env::var("RUST_LOG") {
-            env.push(Env::key_value("RUST_LOG", &rust_log));
-        }
+        volume_mounts.append(&mut spu_pod_config.extra_volume_mounts.clone());
+        volumes.append(&mut spu_pod_config.extra_volumes.clone());
 
-        // env.append(&mut spu_template.env.clone());
+        let mut containers = vec![ContainerSpec {
+            name: SPU_DEFAULT_NAME.to_owned(),
+            image: Some(spu_k8_config.image.clone()),
+            resources: spu_pod_config.resources.clone(),
+            ports: vec![public_port, private_port],
+            volume_mounts,
+            env,
+            args,
+            ..Default::default()
+        }];
 
-        let spu_pod_config = &spu_k8_config.spu_pod_config;
+        containers.append(&mut spu_pod_config.extra_containers.clone());
 
         let template = TemplateSpec {
             metadata: Some(
@@ -308,16 +327,7 @@ mod k8_convert {
             ),
             spec: PodSpec {
                 termination_grace_period_seconds: Some(10),
-                containers: vec![ContainerSpec {
-                    name: SPU_DEFAULT_NAME.to_owned(),
-                    image: Some(spu_k8_config.image.clone()),
-                    resources: spu_pod_config.resources.clone(),
-                    ports: vec![public_port, private_port],
-                    volume_mounts,
-                    env,
-                    args,
-                    ..Default::default()
-                }],
+                containers,
                 volumes,
                 security_context: spu_k8_config.pod_security_context.clone(),
                 node_selector: Some(spu_pod_config.node_selector.clone()),

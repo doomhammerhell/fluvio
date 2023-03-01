@@ -8,6 +8,7 @@ members = [
     "examples/04-admin-watch",
     "crates/fluvio",
     "crates/fluvio-auth",
+    "crates/fluvio-benchmark",
     "crates/fluvio-channel",
     "crates/fluvio-channel-cli",
     "crates/fluvio-cli",
@@ -16,6 +17,8 @@ members = [
     "crates/fluvio-compression",
     "crates/fluvio-controlplane",
     "crates/fluvio-controlplane-metadata",
+    "crates/fluvio-hub-util",
+    "crates/fluvio-hub-protocol",
     "crates/fluvio-extension-common",
     "crates/fluvio-package-index",
     "crates/fluvio-protocol",
@@ -26,7 +29,6 @@ members = [
     "crates/fluvio-service",
     "crates/fluvio-smartmodule",
     "crates/fluvio-smartmodule-derive",
-    "crates/fluvio-smartmodule-package",
     "crates/fluvio-smartengine",
     "crates/fluvio-socket",
     "crates/fluvio-spu",
@@ -39,11 +41,37 @@ members = [
     "crates/fluvio-test-case-derive",
     "crates/fluvio-test-util",
     "crates/fluvio-types",
-    "examples/sm-regex",
+    "crates/fluvio-connector-package",
+    "crates/fluvio-connector-deployer",
+    "crates/fluvio-connector-common",
+    "crates/fluvio-connector-derive",
     "release-tools/check-crate-version",
+    "crates/smartmodule-development-kit",
+    "crates/cdk",
+    "crates/cargo-builder",
+    "connector/json-test-connector",
+    "connector/sink-test-connector"
 ]
+
+exclude = ["smartmodule/regex-filter"]
 resolver = "2"
 
+[workspace.dependencies]
+anyhow = "1.0.38" 
+tracing = "0.1.19"
+thiserror = "1.0.20"
+clap = "4.0.10"
+bytes = "1"
+fluvio-future = "0.4.0"
+convert_case = "0.6.0"
+derive_builder = "0.12.0"
+portpicker = "0.1.1"
+nix = "0.26.0"
+sysinfo = "0.27.0"
+cargo_toml = "0.15"
+base64 = "0.21.0"
+toml = "0.7.0"
+wasmparser = { version = "0.101.0" }
 
 # Used to make eyre faster on debug builds
 # See https://github.com/yaahc/color-eyre#improving-perf-on-debug-builds

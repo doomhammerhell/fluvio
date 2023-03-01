@@ -3,57 +3,44 @@ use std::fmt::Debug;
 
 use tracing::{debug, instrument};
 use anyhow::Result;
-use wasmtime::{AsContextMut, Trap, TypedFunc};
+use wasmtime::{AsContextMut, TypedFunc};
 
 use fluvio_smartmodule::dataplane::smartmodule::{
-    SmartModuleInput, SmartModuleOutput, SmartModuleAggregateInput, SmartModuleInternalError,
-    SmartModuleAggregateOutput,
+    SmartModuleInput, SmartModuleOutput, SmartModuleAggregateInput, SmartModuleAggregateOutput,
+    SmartModuleTransformErrorStatus,
 };
 use crate::{
-    WasmSlice,
-    error::EngineError,
     instance::{SmartModuleInstanceContext, SmartModuleTransform},
-    WasmState, SmartModuleInitialData,
+    SmartModuleInitialData,
+    state::WasmState,
 };
 
-pub(crate) const AGGREGATE_FN_NAME: &str = "aggregate";
-type BaseAggregateFn = TypedFunc<(i32, i32), i32>;
-type AggregateFnWithParam = TypedFunc<(i32, i32, u32), i32>;
+const AGGREGATE_FN_NAME: &str = "aggregate";
 
-#[derive(Debug)]
+type WasmAggregateFn = TypedFunc<(i32, i32, u32), i32>;
+
 pub(crate) struct SmartModuleAggregate {
-    aggregate_fn: AggregateFnKind,
+    aggregate_fn: WasmAggregateFn,
     accumulator: Vec<u8>,
 }
-pub enum AggregateFnKind {
-    Base(BaseAggregateFn),
-    Param(AggregateFnWithParam),
-}
 
-impl Debug for AggregateFnKind {
+impl Debug for SmartModuleAggregate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Base(_aggregate_fn) => write!(f, "OldAggregateFn"),
-            Self::Param(_aggregate_fn) => write!(f, "AggregateFn"),
-        }
-    }
-}
-
-impl AggregateFnKind {
-    fn call(&self, store: impl AsContextMut, slice: WasmSlice) -> Result<i32, Trap> {
-        match self {
-            Self::Base(aggregate_fn) => aggregate_fn.call(store, (slice.0, slice.1)),
-            Self::Param(aggregate_fn) => aggregate_fn.call(store, slice),
-        }
+        write!(f, "AggregateFn")
     }
 }
 
 impl SmartModuleAggregate {
+    #[cfg(test)]
+    fn accumulator(&self) -> &[u8] {
+        &self.accumulator
+    }
+
     pub fn try_instantiate(
         ctx: &SmartModuleInstanceContext,
         initial_data: SmartModuleInitialData,
         store: &mut impl AsContextMut,
-    ) -> Result<Option<Self>, EngineError> {
+    ) -> Result<Option<Self>> {
         // get initial -data
         let accumulator = match initial_data {
             SmartModuleInitialData::Aggregate { accumulator } => accumulator,
@@ -68,15 +55,13 @@ impl SmartModuleAggregate {
                 // check type signature
 
                 func.typed(&mut *store)
-                    .map(AggregateFnKind::Base)
-                    .or_else(|_| func.typed(store).map(AggregateFnKind::Param))
+                    .or_else(|_| func.typed(store))
                     .map(|aggregate_fn| {
                         Some(Self {
                             aggregate_fn,
                             accumulator,
                         })
                     })
-                    .map_err(|wasm_err| EngineError::TypeConversion(AGGREGATE_FN_NAME, wasm_err))
             }
             None => Ok(None),
         }
@@ -84,7 +69,7 @@ impl SmartModuleAggregate {
 }
 
 impl SmartModuleTransform for SmartModuleAggregate {
-    #[instrument(skip(self,ctx,store),fields(offset = input.base_offset))]
+    #[instrument(skip(self,ctx,store),fields(offset = input.base_offset()))]
     fn process(
         &mut self,
         input: SmartModuleInput,
@@ -101,8 +86,8 @@ impl SmartModuleTransform for SmartModuleAggregate {
 
         debug!(aggregate_output);
         if aggregate_output < 0 {
-            let internal_error = SmartModuleInternalError::try_from(aggregate_output)
-                .unwrap_or(SmartModuleInternalError::UnknownError);
+            let internal_error = SmartModuleTransformErrorStatus::try_from(aggregate_output)
+                .unwrap_or(SmartModuleTransformErrorStatus::UnknownError);
             return Err(internal_error.into());
         }
 
@@ -113,5 +98,140 @@ impl SmartModuleTransform for SmartModuleAggregate {
 
     fn name(&self) -> &str {
         AGGREGATE_FN_NAME
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use std::{convert::TryFrom};
+
+    use fluvio_smartmodule::{
+        dataplane::smartmodule::{SmartModuleInput},
+        Record,
+    };
+
+    use crate::{
+        SmartEngine, SmartModuleChainBuilder, SmartModuleConfig, SmartModuleInitialData,
+        metrics::SmartModuleChainMetrics,
+    };
+
+    const SM_AGGEGRATE: &str = "fluvio_smartmodule_aggregate";
+
+    use crate::fixture::read_wasm_module;
+
+    #[ignore]
+    #[test]
+    fn test_aggregate_ok() {
+        let engine = SmartEngine::new();
+        let mut chain_builder = SmartModuleChainBuilder::default();
+
+        chain_builder.add_smart_module(
+            SmartModuleConfig::builder().build().unwrap(),
+            read_wasm_module(SM_AGGEGRATE),
+        );
+
+        let mut chain = chain_builder
+            .initialize(&engine)
+            .expect("failed to build chain");
+
+        assert_eq!(
+            chain.instances().first().expect("first").transform().name(),
+            super::AGGREGATE_FN_NAME
+        );
+
+        let metrics = SmartModuleChainMetrics::default();
+
+        let input = vec![Record::new("a")];
+        let output = chain
+            .process(SmartModuleInput::try_from(input).expect("input"), &metrics)
+            .expect("process");
+        assert_eq!(output.successes.len(), 1);
+        assert_eq!(output.successes[0].value.as_ref(), b"a");
+
+        let aggregate = chain
+            .instances()
+            .first()
+            .expect("first")
+            .transform()
+            .as_any()
+            .downcast_ref::<super::SmartModuleAggregate>()
+            .expect("aggregate");
+
+        assert_eq!(aggregate.accumulator(), b"a");
+
+        // new record should accumulate
+        let input = vec![Record::new("b")];
+        let output = chain
+            .process(SmartModuleInput::try_from(input).expect("input"), &metrics)
+            .expect("process");
+        assert_eq!(output.successes.len(), 1); // generate 3 records
+        assert_eq!(output.successes[0].value.to_string(), "ab");
+
+        let aggregate = chain
+            .instances()
+            .first()
+            .expect("first")
+            .transform()
+            .as_any()
+            .downcast_ref::<super::SmartModuleAggregate>()
+            .expect("aggregate");
+
+        assert_eq!(aggregate.accumulator(), b"ab");
+
+        // sending empty records should not clear accumulator
+        let input = vec![];
+        let output = chain
+            .process(SmartModuleInput::try_from(input).expect("input"), &metrics)
+            .expect("process");
+        assert_eq!(output.successes.len(), 0);
+
+        let aggregate = chain
+            .instances()
+            .first()
+            .expect("first")
+            .transform()
+            .as_any()
+            .downcast_ref::<super::SmartModuleAggregate>()
+            .expect("aggregate");
+
+        assert_eq!(aggregate.accumulator(), b"ab");
+
+        let input = vec![Record::new("c")];
+        let output = chain
+            .process(SmartModuleInput::try_from(input).expect("input"), &metrics)
+            .expect("process");
+        assert_eq!(output.successes.len(), 1); // generate 3 records
+        assert_eq!(output.successes[0].value.as_ref(), b"abc");
+    }
+
+    #[ignore]
+    #[test]
+    fn test_aggregate_with_initial() {
+        let engine = SmartEngine::new();
+        let mut chain_builder = SmartModuleChainBuilder::default();
+
+        chain_builder.add_smart_module(
+            SmartModuleConfig::builder()
+                .initial_data(SmartModuleInitialData::with_aggregate(
+                    "a".to_string().as_bytes().to_vec(),
+                ))
+                .build()
+                .unwrap(),
+            read_wasm_module(SM_AGGEGRATE),
+        );
+
+        let mut chain = chain_builder
+            .initialize(&engine)
+            .expect("failed to build chain");
+
+        let metrics = SmartModuleChainMetrics::default();
+        // new record should accumulate
+        let input = vec![Record::new("b")];
+        let output = chain
+            .process(SmartModuleInput::try_from(input).expect("input"), &metrics)
+            .expect("process");
+        assert_eq!(output.successes.len(), 1); // generate 3 records
+        assert_eq!(output.successes[0].value.as_ref(), b"ab");
     }
 }

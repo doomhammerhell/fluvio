@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use tracing::{debug, instrument};
 use async_rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use anyhow::Result;
 
 use fluvio_protocol::record::BatchRecords;
 use fluvio_controlplane_metadata::partition::{ReplicaKey};
@@ -43,7 +44,7 @@ where
     S: ReplicaStorage,
 {
     /// create new storage replica or restore from durable storage based on configuration
-    pub async fn create(id: ReplicaKey, config: S::ReplicaConfig) -> Result<Self, StorageError> {
+    pub async fn create(id: ReplicaKey, config: S::ReplicaConfig) -> Result<Self> {
         let storage = S::create_or_load(&id, config).await?;
 
         let leo = Arc::new(OffsetPublisher::new(storage.get_leo()));
@@ -132,7 +133,7 @@ where
         &self,
         records: &mut RecordSet<R>,
         hw_update: bool,
-    ) -> Result<(Offset, Offset), StorageError> {
+    ) -> Result<(Offset, Offset, usize)> {
         debug!(
             replica = %self.id,
             leo = self.leo(),
@@ -147,7 +148,7 @@ where
         let base_offset = writer.get_leo();
 
         let now = Instant::now();
-        writer.write_recordset(records, hw_update).await?;
+        let bytes_written = writer.write_recordset(records, hw_update).await?;
         debug!(write_time_ms = %now.elapsed().as_millis());
 
         let leo = writer.get_leo();
@@ -159,7 +160,7 @@ where
             self.hw.update(hw);
         }
 
-        Ok((base_offset, leo))
+        Ok((base_offset, leo, bytes_written))
     }
 
     /// perform permanent remove

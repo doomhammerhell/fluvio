@@ -1,11 +1,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use fluvio_smartengine::{SmartModuleChain, file_batch::FileBatchIterator};
-use tracing::{debug, error, instrument, trace};
-use futures_util::StreamExt;
+use tracing::{debug, error, instrument, trace, warn};
 use tokio::select;
 
+use fluvio_smartengine::SmartModuleChainInstance;
 use fluvio_controlplane_metadata::partition::ReplicaKey;
 use fluvio_types::event::{StickyEvent, offsets::OffsetPublisher};
 use fluvio_future::task::spawn;
@@ -14,7 +13,7 @@ use fluvio_protocol::{
     api::{RequestMessage, RequestHeader},
     record::{RecordSet, Offset, RawRecords},
 };
-use fluvio_protocol::link::{ErrorCode, smartmodule::SmartModuleRuntimeError};
+use fluvio_protocol::link::{ErrorCode, smartmodule::SmartModuleTransformRuntimeError};
 use fluvio_compression::CompressionError;
 use fluvio_spu_schema::{
     server::stream_fetch::{
@@ -27,11 +26,15 @@ use fluvio_spu_schema::{
 use fluvio_types::event::offsets::OffsetChangeListener;
 use fluvio_protocol::record::Batch;
 
-use crate::core::DefaultSharedGlobalContext;
+use crate::core::{DefaultSharedGlobalContext, metrics::IncreaseValue};
 use crate::replication::leader::SharedFileLeaderState;
 use crate::services::public::conn_context::ConnectionContext;
 use crate::services::public::stream_fetch::publishers::INIT_OFFSET;
-use crate::smartengine::SmartModuleContext;
+use crate::smartengine::context::SmartModuleContext;
+use crate::smartengine::batch::BatchSmartEngine;
+use crate::smartengine::file_batch::FileBatchIterator;
+use crate::core::metrics::SpuMetrics;
+use crate::traffic::TrafficType;
 
 /// Fetch records as stream
 pub struct StreamFetchHandler {
@@ -45,6 +48,7 @@ pub struct StreamFetchHandler {
     consumer_offset_listener: OffsetChangeListener,
     leader_state: SharedFileLeaderState,
     stream_id: u32,
+    metrics: Arc<SpuMetrics>,
 }
 
 impl StreamFetchHandler {
@@ -132,21 +136,15 @@ impl StreamFetchHandler {
         debug!("request: {:#?}", msg);
         let version = header.api_version();
 
-        let derivedstream_ctx = match SmartModuleContext::extract(
-            msg.wasm_payload,
-            msg.smartmodule,
-            msg.derivedstream,
-            version,
-            &ctx,
-        )
-        .await
-        {
-            Ok(ctx) => ctx,
-            Err(error_code) => {
-                send_back_error(&sink, &replica, &header, stream_id, error_code).await?;
-                return Ok(());
-            }
-        };
+        let derivedstream_ctx =
+            match SmartModuleContext::try_from(msg.smartmodules, version, &ctx).await {
+                Ok(ctx) => ctx,
+                Err(error_code) => {
+                    warn!("smartmodule context init failed: {:?}", error_code);
+                    send_back_error(&sink, &replica, &header, stream_id, error_code).await?;
+                    return Ok(());
+                }
+            };
 
         let max_bytes = msg.max_bytes as u32;
         // compute max fetch bytes depends on smart stream
@@ -179,6 +177,7 @@ impl StreamFetchHandler {
             stream_id,
             leader_state,
             max_fetch_bytes,
+            metrics: ctx.metrics(),
         };
 
         if let Err(err) = handler.process(starting_offset, derivedstream_ctx).await {
@@ -209,43 +208,24 @@ impl StreamFetchHandler {
     async fn process(
         mut self,
         starting_offset: Offset,
-        derivedstream_ctx: Option<SmartModuleContext>,
+        sm_ctx: Option<SmartModuleContext>,
     ) -> Result<(), StreamFetchError> {
-        let (mut smartmodule_instance, mut right_consumer_stream) =
-            if let Some(ctx) = derivedstream_ctx {
-                let SmartModuleContext {
-                    sm_chain: st,
-                    right_consumer_stream,
-                } = ctx;
-                (Some(st), right_consumer_stream)
-            } else {
-                (None, None)
-            };
-        let mut join_record = if let Some(join_stream) = right_consumer_stream.as_mut() {
-            // we wait for at least one record
-            join_stream.next().await.transpose().map_err(|err| {
-                StreamFetchError::Fetch(ErrorCode::Other(format!(
-                    "failed to get record from join stream {}",
-                    err
-                )))
-            })?
+        let mut smartmodule_instance = if let Some(ctx) = sm_ctx {
+            let SmartModuleContext { chain: st } = ctx;
+            Some(st)
         } else {
             None
         };
 
         let (mut last_partition_offset, consumer_wait) = self
-            .send_back_records(
-                starting_offset,
-                smartmodule_instance.as_mut(),
-                join_record.as_ref(),
-            )
+            .send_back_records(starting_offset, smartmodule_instance.as_mut())
             .await?;
 
         let mut leader_offset_receiver = self.leader_state.offset_listener(&self.isolation);
         let mut counter: i32 = 0;
         // since we don't need to wait for consumer, can move consumer to same offset as last read
         let mut last_known_consumer_offset: Option<Offset> =
-            (!consumer_wait).then(|| last_partition_offset);
+            (!consumer_wait).then_some(last_partition_offset);
 
         loop {
             counter += 1;
@@ -261,27 +241,6 @@ impl StreamFetchHandler {
                     debug!("end event has been received, terminating");
                     break;
                 },
-
-
-
-                record = async {  right_consumer_stream.as_mut().expect("Unexpected crash").next().await }, if right_consumer_stream.is_some() =>  {
-                    debug!("Updated right stream");
-                    match record {
-                        Some(rec) => {
-                            join_record = Some(rec.map_err(|err|
-                               StreamFetchError::Fetch(ErrorCode::Other(
-                                    format!("failed to get record from join stream {}", err),
-                                ))
-                            )?);
-                        },
-                        None => {
-                            debug!("join stream has been closed, terminating");
-                            break;
-                        }
-                    }
-
-                },
-
 
 
                 // Received offset update from consumer, i.e. consumer acknowledged to this offset
@@ -308,7 +267,7 @@ impl StreamFetchHandler {
                         last_partition_offset,
                         "Consumer offset updated and is behind, need to send records",
                     );
-                    let (offset, wait) = self.send_back_records(consumer_offset_update, smartmodule_instance.as_mut(), join_record.as_ref()).await?;
+                    let (offset, wait) = self.send_back_records(consumer_offset_update, smartmodule_instance.as_mut()).await?;
                     last_partition_offset = offset;
                     if wait {
                         last_known_consumer_offset = None;
@@ -349,7 +308,7 @@ impl StreamFetchHandler {
 
                     // We need to send the consumer all records since the last consumer offset
                     debug!(partition_offset_update, last_consumer_offset, "reading offset event");
-                    let (offset, wait) = self.send_back_records(last_consumer_offset, smartmodule_instance.as_mut(), join_record.as_ref()).await?;
+                    let (offset, wait) = self.send_back_records(last_consumer_offset, smartmodule_instance.as_mut()).await?;
                     last_partition_offset = offset;
                     if wait {
                         last_known_consumer_offset = None;
@@ -376,14 +335,13 @@ impl StreamFetchHandler {
     /// return (next offset, consumer wait)
     //  consumer wait flag tells that there are records send back to consumer
     #[instrument(
-        skip(self, sm_chain, join_last_record),
+        skip(self, sm_chain),
         fields(stream_id = self.stream_id)
     )]
     async fn send_back_records(
         &mut self,
         starting_offset: Offset,
-        sm_chain: Option<&mut SmartModuleChain>,
-        join_last_record: Option<&fluvio::consumer::Record>,
+        sm_chain: Option<&mut SmartModuleChainInstance>,
     ) -> Result<(Offset, bool), StreamFetchError> {
         let now = Instant::now();
 
@@ -403,6 +361,7 @@ impl StreamFetchHandler {
             Ok(slice) => {
                 file_partition_response.high_watermark = slice.end.hw;
                 file_partition_response.log_start_offset = slice.start;
+
                 if let Some(file_slice) = slice.file_slice {
                     file_partition_response.records = file_slice.into();
                 }
@@ -432,7 +391,7 @@ impl StreamFetchHandler {
             return Ok((starting_offset, false));
         }
 
-        let output = match sm_chain {
+        let (offset, wait, metrics_update) = match sm_chain {
             Some(chain) => {
                 // If a SmartModule is provided, we need to read records from file to memory
                 // In-memory records are then processed by SmartModule and returned to consumer
@@ -445,26 +404,27 @@ impl StreamFetchHandler {
                     .process_batch(
                         &mut file_batch_iterator,
                         self.max_bytes as usize,
-                        join_last_record.map(|s| s.inner()),
+                        self.metrics.chain_metrics(),
                     )
                     .map_err(|err| {
-                        StreamFetchError::Fetch(ErrorCode::Other(format!(
-                            "SmartModule err {}",
-                            err
-                        )))
+                        StreamFetchError::Fetch(ErrorCode::Other(format!("SmartModule err {err}")))
                     })?;
+                let metrics_update = IncreaseValue::from(&batch);
 
-                self.send_processed_response(
-                    file_partition_response,
-                    next_offset,
-                    batch,
-                    smartmodule_error,
-                )
-                .await?
+                let (offset, wait) = self
+                    .send_processed_response(
+                        file_partition_response,
+                        next_offset,
+                        batch,
+                        smartmodule_error,
+                    )
+                    .await?;
+                (offset, wait, metrics_update)
             }
             None => {
                 // If no SmartModule is provided, respond using raw file records
                 debug!("No SmartModule, sending back entire log");
+                let metrics_update = IncreaseValue::from(&file_partition_response);
 
                 let response = StreamFetchResponse {
                     topic: self.replica.topic.clone(),
@@ -488,10 +448,17 @@ impl StreamFetchHandler {
 
                 debug!(read_time_ms = %now.elapsed().as_millis(),"finish sending back records");
 
-                (read_end_offset.isolation(&self.isolation), true)
+                (
+                    read_end_offset.isolation(&self.isolation),
+                    true,
+                    metrics_update,
+                )
             }
         };
-        Ok(output)
+        self.metrics
+            .outbound()
+            .increase_by_value(self.header.is_connector(), metrics_update);
+        Ok((offset, wait))
     }
 
     #[instrument(skip(self, file_partition_response, batch, smartmodule_error))]
@@ -500,7 +467,7 @@ impl StreamFetchHandler {
         file_partition_response: FilePartitionResponse,
         next_offset: Offset,
         batch: Batch,
-        smartmodule_error: Option<SmartModuleRuntimeError>,
+        smartmodule_error: Option<SmartModuleTransformRuntimeError>,
     ) -> Result<(Offset, bool), StreamFetchError> {
         type DefaultPartitionResponse = FetchablePartitionResponse<RecordSet<RawRecords>>;
 
@@ -629,7 +596,7 @@ pub mod publishers {
     use std::fmt::Debug;
     use std::ops::AddAssign;
 
-    use super::{OffsetPublisher};
+    use super::OffsetPublisher;
 
     pub const INIT_OFFSET: i64 = -1;
 

@@ -9,9 +9,10 @@ pub use list::*;
 pub use watch::*;
 pub use metadata::*;
 
-pub use crate::NameFilter;
 pub(crate) use object_macro::*;
 pub(crate) use delete_macro::*;
+
+pub(crate) const COMMON_VERSION: i16 = 10; // from now, we use a single version for all objects
 
 mod metadata {
 
@@ -25,6 +26,7 @@ mod metadata {
     use fluvio_controlplane_metadata::store::MetadataStoreObject;
     use fluvio_controlplane_metadata::core::{MetadataContext, MetadataItem};
 
+    use crate::AdminSpec;
     use crate::core::Spec;
 
     #[derive(Encoder, Decoder, Default, Clone, Debug)]
@@ -59,6 +61,20 @@ mod metadata {
         }
     }
 
+    impl<S> Metadata<S>
+    where
+        S: AdminSpec + Encoder + Decoder,
+        S::Status: Encoder + Decoder,
+    {
+        pub fn summary(self) -> Self {
+            Self {
+                name: self.name,
+                spec: self.spec.summary(),
+                status: self.status,
+            }
+        }
+    }
+
     impl<S, C> TryFrom<Metadata<S>> for MetadataStoreObject<S, C>
     where
         S: Spec + Encoder + Decoder,
@@ -74,10 +90,7 @@ mod metadata {
                 spec: value.spec,
                 status: value.status,
                 key: value.name.try_into().map_err(|err| {
-                    IoError::new(
-                        ErrorKind::InvalidData,
-                        format!("problem converting: {}", err),
-                    )
+                    IoError::new(ErrorKind::InvalidData, format!("problem converting: {err}"))
                 })?,
                 ctx: MetadataContext::default(),
             })
@@ -104,10 +117,8 @@ mod object_macro {
                     CustomSpu($api<crate::customspu::CustomSpuSpec>),
                     SmartModule($api<crate::smartmodule::SmartModuleSpec>),
                     Partition($api<crate::partition::PartitionSpec>),
-                    ManagedConnector($api<crate::connector::ManagedConnectorSpec>),
                     SpuGroup($api<crate::spg::SpuGroupSpec>),
                     TableFormat($api<crate::tableformat::TableFormatSpec>),
-                    DerivedStream($api<crate::derivedstream::DerivedStreamSpec>),
                 }
 
                 impl Default for [<ObjectApi $api>] {
@@ -125,10 +136,8 @@ mod object_macro {
                             Self::CustomSpu(_) => crate::customspu::CustomSpuSpec::LABEL,
                             Self::SmartModule(_) => crate::smartmodule::SmartModuleSpec::LABEL,
                             Self::Partition(_) => crate::partition::PartitionSpec::LABEL,
-                            Self::ManagedConnector(_) => crate::connector::ManagedConnectorSpec::LABEL,
                             Self::SpuGroup(_) => crate::spg::SpuGroupSpec::LABEL,
                             Self::TableFormat(_) => crate::tableformat::TableFormatSpec::LABEL,
-                            Self::DerivedStream(_) => crate::derivedstream::DerivedStreamSpec::LABEL,
 
                         }
                     }
@@ -146,10 +155,8 @@ mod object_macro {
                                 Self::CustomSpu(s) => s.write_size(version),
                                 Self::Partition(s) => s.write_size(version),
                                 Self::SmartModule(s) => s.write_size(version),
-                                Self::ManagedConnector(s) => s.write_size(version),
                                 Self::SpuGroup(s) => s.write_size(version),
                                 Self::TableFormat(s) => s.write_size(version),
-                                Self::DerivedStream(s) => s.write_size(version),
                             }
                     }
 
@@ -168,10 +175,8 @@ mod object_macro {
                             Self::SpuGroup(s) => s.encode(dest, version)?,
                             Self::Spu(s) => s.encode(dest, version)?,
                             Self::Partition(s) => s.encode(dest, version)?,
-                            Self::ManagedConnector(s) => s.encode(dest, version)?,
                             Self::SmartModule(s) => s.encode(dest, version)?,
                             Self::TableFormat(s) => s.encode(dest, version)?,
-                            Self::DerivedStream(s) => s.encode(dest, version)?,
                         }
 
                         Ok(())
@@ -249,21 +254,6 @@ mod object_macro {
                                 Ok(())
                             }
 
-                            crate::connector::ManagedConnectorSpec::LABEL => {
-                                tracing::trace!("detected connector");
-                                let mut request = $api::<crate::connector::ManagedConnectorSpec>::default();
-                                request.decode(src, version)?;
-                                *self = Self::ManagedConnector(request);
-                                Ok(())
-                            },
-
-                            crate::derivedstream::DerivedStreamSpec::LABEL => {
-                                tracing::trace!("detected derivedstream");
-                                let mut request = $api::<crate::derivedstream::DerivedStreamSpec>::default();
-                                request.decode(src, version)?;
-                                *self = Self::DerivedStream(request);
-                                Ok(())
-                            }
 
                             // Unexpected type
                             _ => Err(std::io::Error::new(
@@ -344,10 +334,8 @@ mod delete_macro {
                     Topic($api<crate::topic::TopicSpec>),
                     CustomSpu($api<crate::customspu::CustomSpuSpec>),
                     SmartModule($api<crate::smartmodule::SmartModuleSpec>),
-                    ManagedConnector($api<crate::connector::ManagedConnectorSpec>),
                     SpuGroup($api<crate::spg::SpuGroupSpec>),
                     TableFormat($api<crate::tableformat::TableFormatSpec>),
-                    DerivedStream($api<crate::derivedstream::DerivedStreamSpec>),
                 }
 
                 impl Default for [<ObjectApi $api>] {
@@ -363,10 +351,8 @@ mod delete_macro {
                             Self::Topic(_) => crate::topic::TopicSpec::LABEL,
                             Self::CustomSpu(_) => crate::customspu::CustomSpuSpec::LABEL,
                             Self::SmartModule(_) => crate::smartmodule::SmartModuleSpec::LABEL,
-                            Self::ManagedConnector(_) => crate::connector::ManagedConnectorSpec::LABEL,
                             Self::SpuGroup(_) => crate::spg::SpuGroupSpec::LABEL,
                             Self::TableFormat(_) => crate::tableformat::TableFormatSpec::LABEL,
-                            Self::DerivedStream(_) => crate::derivedstream::DerivedStreamSpec::LABEL,
                         }
                     }
                 }
@@ -381,10 +367,8 @@ mod delete_macro {
                                 Self::Topic(s) => s.write_size(version),
                                 Self::CustomSpu(s) => s.write_size(version),
                                 Self::SmartModule(s) => s.write_size(version),
-                                Self::ManagedConnector(s) => s.write_size(version),
                                 Self::SpuGroup(s) => s.write_size(version),
                                 Self::TableFormat(s) => s.write_size(version),
-                                Self::DerivedStream(s) => s.write_size(version),
                             }
                     }
 
@@ -401,10 +385,8 @@ mod delete_macro {
                             Self::Topic(s) => s.encode(dest, version)?,
                             Self::CustomSpu(s) => s.encode(dest, version)?,
                             Self::SpuGroup(s) => s.encode(dest, version)?,
-                            Self::ManagedConnector(s) => s.encode(dest, version)?,
                             Self::SmartModule(s) => s.encode(dest, version)?,
                             Self::TableFormat(s) => s.encode(dest, version)?,
-                            Self::DerivedStream(s) => s.encode(dest, version)?,
                         }
 
                         Ok(())
@@ -458,15 +440,6 @@ mod delete_macro {
                                 return Ok(())
                             }
 
-
-                            crate::connector::ManagedConnectorSpec::LABEL => {
-                                tracing::trace!("detected connector");
-                                let mut request = $api::<crate::connector::ManagedConnectorSpec>::default();
-                                request.decode(src, version)?;
-                                *self = Self::ManagedConnector(request);
-                                Ok(())
-                            },
-
                             crate::smartmodule::SmartModuleSpec::LABEL => {
                                 tracing::trace!("detected smartmodule");
                                 let mut request = $api::<crate::smartmodule::SmartModuleSpec>::default();
@@ -475,13 +448,6 @@ mod delete_macro {
                                 Ok(())
                             },
 
-                            crate::derivedstream::DerivedStreamSpec::LABEL => {
-                                tracing::trace!("detected derivedstream");
-                                let mut request = $api::<crate::derivedstream::DerivedStreamSpec>::default();
-                                request.decode(src, version)?;
-                                *self = Self::DerivedStream(request);
-                                Ok(())
-                            }
 
                             // Unexpected type
                             _ => Err(std::io::Error::new(
@@ -519,7 +485,7 @@ mod test {
     use crate::customspu::CustomSpuSpec;
 
     fn create_req() -> ObjectApiListRequest {
-        let list_request: ListRequest<TopicSpec> = ListRequest::new(vec![]);
+        let list_request: ListRequest<TopicSpec> = ListRequest::new(vec![], false);
         list_request.into()
     }
 
@@ -579,7 +545,7 @@ mod test {
             .encode(&mut src, ObjectApiWatchRequest::API_KEY as i16)
             .expect("encoding");
         //watch_response.encode(&mut src, 0).expect("encoding");
-        println!("output: {:#?}", src);
+        println!("output: {src:#?}");
         let dec = WatchResponse::<TopicSpec>::decode_from(
             &mut Cursor::new(&src),
             ObjectApiWatchRequest::API_KEY as i16,
@@ -604,7 +570,7 @@ mod test {
             .encode(&mut src, ObjectApiWatchRequest::API_KEY as i16)
             .expect("encoding");
 
-        println!("output: {:#?}", src);
+        println!("output: {src:#?}");
 
         assert_eq!(
             src.len(),
@@ -635,7 +601,7 @@ mod test {
             .encode(&mut src, ObjectApiWatchRequest::API_KEY as i16)
             .expect("encoding");
 
-        println!("output: {:#?}", src);
+        println!("output: {src:#?}");
 
         assert_eq!(
             src.len(),
@@ -671,7 +637,7 @@ mod test {
         let mut src = vec![];
         res_msg.encode(&mut src, 0).expect("encoding");
 
-        println!("output: {:#?}", src);
+        println!("output: {src:#?}");
 
         let dec_msg: ResponseMessage<ObjectApiListResponse> = ResponseMessage::decode_from(
             &mut Cursor::new(&src),

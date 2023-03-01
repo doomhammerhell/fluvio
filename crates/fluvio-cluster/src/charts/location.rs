@@ -134,7 +134,7 @@ mod inline {
         }
 
         /// find a single chart and return it's physical path
-        pub fn unpack<'a>(inline: &Dir<'a>, base_dir: &Path) -> Result<PathBuf, IoError> {
+        pub fn unpack(inline: &Dir, base_dir: &Path) -> Result<PathBuf, IoError> {
             debug!(?base_dir, "unpacking inline at base");
 
             // there should be only 1 chart file in the directory
@@ -162,7 +162,7 @@ mod inline {
                 let mut builder = DirBuilder::new();
                 builder.recursive(true);
                 builder
-                    .create(&debug_chart_path)
+                    .create(debug_chart_path)
                     .expect("FLV_INLINE_CHART_DIR not exists");
                 let mut debug_file = File::create(debug_chart_path.join(inline_file.path()))
                     .expect("chart cant' be created");

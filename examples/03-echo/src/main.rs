@@ -89,7 +89,7 @@
 //! ```
 
 use std::time::Duration;
-use fluvio::{FluvioError, Offset, RecordKey};
+use fluvio::{Offset, RecordKey};
 use futures::future::join;
 use async_std::task::spawn;
 use async_std::future::timeout;
@@ -111,23 +111,23 @@ async fn main() {
     let (produce_result, consume_result) = match timed_result {
         Ok(results) => results,
         Err(_) => {
-            println!("Echo timed out after {}ms", TIMEOUT_MS);
+            println!("Echo timed out after {TIMEOUT_MS}ms");
             std::process::exit(1);
         }
     };
 
     match (produce_result, consume_result) {
         (Err(produce_err), Err(consume_err)) => {
-            println!("Echo produce error: {:?}", produce_err);
-            println!("Echo consume error: {:?}", consume_err);
+            println!("Echo produce error: {produce_err:?}");
+            println!("Echo consume error: {consume_err:?}");
             std::process::exit(1);
         }
         (Err(produce_err), _) => {
-            println!("Echo produce error: {:?}", produce_err);
+            println!("Echo produce error: {produce_err:?}");
             std::process::exit(1);
         }
         (_, Err(consume_err)) => {
-            println!("Echo consume error: {:?}", consume_err);
+            println!("Echo consume error: {consume_err:?}");
             std::process::exit(1);
         }
         _ => (),
@@ -135,13 +135,13 @@ async fn main() {
 }
 
 /// Produces 10 "Hello, Fluvio" events, followed by a "Done!" event
-async fn produce() -> Result<(), FluvioError> {
+async fn produce() -> anyhow::Result<()> {
     let producer = fluvio::producer(TOPIC).await?;
 
     for i in 0..10u32 {
-        println!("Sending record {}", i);
+        println!("Sending record {i}");
         producer
-            .send(format!("Key {}", i), format!("Value {}", i))
+            .send(format!("Key {i}"), format!("Value {i}"))
             .await?;
     }
     producer.send(RecordKey::NULL, "Done!").await?;
@@ -151,7 +151,7 @@ async fn produce() -> Result<(), FluvioError> {
 }
 
 /// Consumes events until a "Done!" event is read
-async fn consume() -> Result<(), FluvioError> {
+async fn consume() -> anyhow::Result<()> {
     use futures::StreamExt;
 
     let consumer = fluvio::consumer(TOPIC, 0).await?;
@@ -162,7 +162,7 @@ async fn consume() -> Result<(), FluvioError> {
             .key()
             .map(|key| String::from_utf8_lossy(key).to_string());
         let value = String::from_utf8_lossy(record.value()).to_string();
-        println!("Got record: key={:?}, value={}", key, value);
+        println!("Got record: key={key:?}, value={value}");
         if value == "Done!" {
             return Ok(());
         }

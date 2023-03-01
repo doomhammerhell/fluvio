@@ -14,9 +14,9 @@ use fluvio_test_util::test_meta::{BaseCli, TestCase, TestCli, TestOption};
 use fluvio_test_util::test_meta::test_result::TestResult;
 use fluvio_test_util::test_meta::environment::{EnvDetail, EnvironmentSetup};
 use fluvio_test_util::setup::TestCluster;
-use fluvio_test_util::test_runner::test_driver::{TestDriver};
+use fluvio_test_util::test_runner::test_driver::TestDriver;
 use fluvio_test_util::test_runner::test_meta::FluvioTestMeta;
-use fluvio_test_util::{async_process};
+use fluvio_test_util::async_process;
 
 // This is important for `inventory` crate
 #[allow(unused_imports)]
@@ -65,7 +65,7 @@ fn main() {
     let test_result = run_test(option.environment.clone(), test_opt, test_meta);
 
     cluster_cleanup(option.environment);
-    println!("{}", test_result);
+    println!("{test_result}");
 
     if test_result.success {
         exit(0)
@@ -84,9 +84,9 @@ fn run_test(
     let test_cluster_opts = TestCluster::new(environment.clone());
     let test_driver = TestDriver::new(Some(test_cluster_opts));
 
-    let ok_signal = Arc::new(AtomicBool::new(false));
+    let finished_signal = Arc::new(AtomicBool::new(false));
     let fail_signal = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGUSR1, Arc::clone(&ok_signal))
+    signal_hook::flag::register(signal_hook::consts::SIGUSR1, Arc::clone(&finished_signal))
         .expect("fail to register ok signal hook");
     signal_hook::flag::register(signal_hook::consts::SIGUSR2, Arc::clone(&fail_signal))
         .expect("fail to register fail signal hook");
@@ -107,17 +107,26 @@ fn run_test(
             let status = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 (test_meta.test_fn)(test_driver, test_case)
             }));
-            match status {
-                Ok(_) => {
-                    println!("test passed, signalling success to parent");
-                    root_process.kill_with(Signal::User1);
-                    process::exit(0)
+            let parent_id = get_parent_pid();
+            debug!(
+                "catch_unwind. PID {:?}, root_pid {root_pid}, parent_id {parent_id}",
+                get_current_pid().unwrap(),
+            );
+            if parent_id == root_pid {
+                println!("test complete, signaling to parent");
+                root_process.kill_with(Signal::User1);
+            }
+            if let Err(err) = status {
+                if environment.expect_fail {
+                    println!("test failed as expected, signaling parent");
+                } else {
+                    println!("test failed {err:#?}, signaling parent");
                 }
-                Err(err) => {
-                    println!("test failed {:#?}, signalling parent", err);
-                    root_process.kill_with(Signal::User2);
-                    process::exit(1);
-                }
+                // This doesn't actually kill root_process, just sends it the signal
+                root_process.kill_with(Signal::User2);
+                process::exit(1);
+            } else {
+                process::exit(0);
             }
         }
         Err(_) => panic!("Fork failed"),
@@ -132,7 +141,7 @@ fn run_test(
     let mut timed_out = false;
 
     loop {
-        if ok_signal.load(Ordering::Relaxed) || fail_signal.load(Ordering::Relaxed) {
+        if finished_signal.load(Ordering::Relaxed) {
             debug!("signal received");
             break;
         }
@@ -148,20 +157,28 @@ fn run_test(
         }
     }
 
-    let ok = ok_signal.load(Ordering::Relaxed);
-    let fail = fail_signal.load(Ordering::Relaxed);
+    let success = fail_signal.load(Ordering::Relaxed) == environment.expect_fail;
 
-    debug!(ok, fail, "signal status");
+    debug!(success, "signal status");
 
     if timed_out {
-        println!("Test timed out after {} seconds", timeout.as_secs());
+        let success = if environment.expect_timeout {
+            println!(
+                "Test timed out as expected after {} seconds",
+                timeout.as_secs()
+            );
+            true
+        } else {
+            println!("Test timed out after {} seconds", timeout.as_secs());
+            false
+        };
         kill_child_processes(root_process);
         TestResult {
-            success: true,
+            success,
             duration: start.elapsed().unwrap(),
             ..std::default::Default::default()
         }
-    } else if ok {
+    } else if success {
         println!("Test passed");
         TestResult {
             success: true,
@@ -169,8 +186,7 @@ fn run_test(
             ..std::default::Default::default()
         }
     } else {
-        println!("test failed, killing all child processes");
-        kill_child_processes(root_process);
+        println!("Test failed");
         TestResult {
             success: false,
             duration: start.elapsed().unwrap(),
@@ -277,6 +293,14 @@ fn create_spinning_indicator() -> Option<ProgressBar> {
     }
 }
 
+fn get_parent_pid() -> sysinfo::Pid {
+    let pid = get_current_pid().expect("Unable to get current pid");
+    let mut sys2 = System::new();
+    sys2.refresh_processes();
+    let current_process = sys2.process(pid).expect("Current process not found");
+    current_process.parent().expect("Parent process not found")
+}
+
 #[cfg(test)]
 mod tests {
     // CLI Tests
@@ -354,7 +378,7 @@ mod tests {
 
     #[test]
     fn timeout() {
-        let args = BaseCli::parse_from(vec!["fluvio-test", "smoke", "--timeout", "9000"]);
+        let args = BaseCli::parse_from(vec!["fluvio-test", "smoke", "--timeout", "9000s"]);
 
         assert_eq!(args.environment.timeout(), Duration::from_secs(9000));
     }

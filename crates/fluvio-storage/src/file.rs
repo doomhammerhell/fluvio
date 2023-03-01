@@ -26,7 +26,7 @@ pub struct FileBytesIterator {
 #[async_trait]
 impl StorageBytesIterator for FileBytesIterator {
     async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, IoError> {
-        debug!(path = ?path.as_ref().display(),"open file");
+        debug!(path = ?path.as_ref().display(),"opening log file for iteration");
         let file = File::open(path).await?;
         Self::from_file(file).await
     }
@@ -52,7 +52,7 @@ impl StorageBytesIterator for FileBytesIterator {
         let file_pos = self.pos as i64;
         match unblock(move || pread(fd, file_pos, len as usize))
             .await
-            .map_err(|e| IoError::new(ErrorKind::Other, format!("pread error: {:#?}", e)))?
+            .map_err(|e| IoError::new(ErrorKind::Other, format!("pread error: {e:#?}")))?
         {
             ReadOutput::Some { buffer, eof } => {
                 trace!(len = buffer.len(), "read bytes");
@@ -105,7 +105,7 @@ impl ReadOutput {
 #[instrument(level = "trace", fields(fd, offset, len))]
 fn pread(fd: RawFd, offset: i64, len: usize) -> NixResult<ReadOutput> {
     let mut eof = false;
-    let mut buf = BytesMut::with_capacity(len as usize);
+    let mut buf = BytesMut::with_capacity(len);
     let mut buf_len = len;
     let mut buf_offset = 0;
     let mut total_read = 0;
@@ -119,7 +119,7 @@ fn pread(fd: RawFd, offset: i64, len: usize) -> NixResult<ReadOutput> {
                 offset + total_read as i64,
             )
         };
-        let read = Errno::result(res).map(|r| r as isize)?;
+        let read = Errno::result(res)?;
         if read == 0 {
             trace!(fd, total_read, "end of file");
             if total_read == 0 {

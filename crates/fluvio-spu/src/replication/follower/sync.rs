@@ -7,6 +7,7 @@ use std::io::Error as IoError;
 use std::marker::PhantomData;
 
 use bytes::BytesMut;
+use fluvio_types::PartitionId;
 use tracing::trace;
 
 use fluvio_protocol::store::StoreValue;
@@ -42,7 +43,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[")?;
         for topic in &self.topics {
-            write!(f, "{},", topic)?;
+            write!(f, "{topic},")?;
         }
         write!(f, "]")
     }
@@ -94,7 +95,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} [", self.name)?;
         for partition in &self.partitions {
-            write!(f, "{},", partition)?;
+            write!(f, "{partition},")?;
         }
         write!(f, "]")
     }
@@ -105,7 +106,7 @@ pub struct PeerFetchablePartitionResponse<R>
 where
     R: Encoder + Decoder + Default + Debug,
 {
-    pub partition: i32,
+    pub partition: PartitionId,
     pub error: ErrorCode,
     pub hw: i64,
     pub leo: i64,

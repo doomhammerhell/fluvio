@@ -408,7 +408,7 @@ impl LocalInstaller {
         Command::new("sync")
             .inherit()
             .result()
-            .map_err(|e| LocalInstallError::Other(format!("sync issue: {:#?}", e)))?;
+            .map_err(|e| LocalInstallError::Other(format!("sync issue: {e:#?}")))?;
 
         // set host name and port for SC
         // this should mirror K8
@@ -482,7 +482,7 @@ impl LocalInstaller {
     #[instrument(skip(self))]
     fn set_profile(&self) -> Result<(), LocalInstallError> {
         let pb = self.pb_factory.create()?;
-        pb.set_message(format!("Creating Local Profile to: {}", LOCAL_SC_ADDRESS));
+        pb.set_message(format!("Creating Local Profile to: {LOCAL_SC_ADDRESS}"));
 
         let mut config_file = ConfigFile::load_default_or_new()?;
         config_file.add_or_replace_profile(
@@ -568,7 +568,7 @@ impl LocalInstaller {
         ));
         // wait for list of spu
         while time.elapsed().unwrap() < timeout_duration {
-            let spus = admin.list::<SpuSpec, _>(vec![]).await?;
+            let spus = admin.all::<SpuSpec>().await?;
             let ready_spu = spus.iter().filter(|spu| spu.status.is_online()).count();
             let elapsed = time.elapsed().unwrap();
             pb.set_message(format!(

@@ -1,15 +1,18 @@
 use std::{fmt, str::FromStr};
 use std::path::PathBuf;
-use fluvio_controlplane_metadata::spg::{SpuConfig, StorageConfig};
+
 use clap::Parser;
 use semver::Version;
+use anyhow::Result;
+
+use fluvio_controlplane_metadata::spg::{SpuConfig, StorageConfig};
+use fluvio_types::defaults::{TLS_SERVER_SECRET_NAME, TLS_CLIENT_SECRET_NAME};
 
 mod local;
 mod k8;
 mod sys;
 mod tls;
 
-use crate::cli::ClusterCliError;
 use tls::TlsOpt;
 
 #[cfg(target_os = "macos")]
@@ -22,7 +25,7 @@ pub fn get_log_directory() -> &'static str {
     "/tmp"
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DefaultLogDirectory(String);
 
 impl Default for DefaultLogDirectory {
@@ -95,12 +98,20 @@ pub struct K8Install {
     pub chart_location: Option<String>,
 
     /// chart values
-    #[clap(long, parse(from_os_str))]
+    #[clap(long, value_parser)]
     pub chart_values: Vec<PathBuf>,
 
     /// Uses port forwarding for connecting to SC during install
     #[clap(long)]
     use_k8_port_forwarding: bool,
+
+    /// TLS: Client secret name while adding to Kubernetes
+    #[clap(long, default_value = TLS_CLIENT_SECRET_NAME)]
+    tls_client_secret_name: String,
+
+    /// TLS: Server secret name while adding to Kubernetes
+    #[clap(long, default_value = TLS_SERVER_SECRET_NAME)]
+    tls_server_secret_name: String,
 }
 
 #[derive(Debug, Parser)]
@@ -165,11 +176,7 @@ pub struct StartOpt {
 }
 
 impl StartOpt {
-    pub async fn process(
-        self,
-        platform_version: Version,
-        upgrade: bool,
-    ) -> Result<(), ClusterCliError> {
+    pub async fn process(self, platform_version: Version, upgrade: bool) -> Result<()> {
         use crate::cli::start::local::process_local;
         use crate::cli::start::sys::process_sys;
         use crate::cli::start::k8::process_k8;
@@ -193,7 +200,7 @@ pub struct UpgradeOpt {
 }
 
 impl UpgradeOpt {
-    pub async fn process(self, platform_version: Version) -> Result<(), ClusterCliError> {
+    pub async fn process(self, platform_version: Version) -> Result<()> {
         self.start.process(platform_version, true).await?;
         Ok(())
     }

@@ -9,12 +9,12 @@ use fluvio_protocol::record::ReplicaKey;
 use fluvio_protocol::api::Request;
 use fluvio_protocol::api::RequestMessage;
 use fluvio_types::SpuId;
-use fluvio_socket::{MultiplexerSocket, SharedMultiplexerSocket, SocketError, AsyncResponse};
+use fluvio_socket::{
+    Versions, VersionedSerialSocket, ClientConfig, MultiplexerSocket, SharedMultiplexerSocket,
+    SocketError, AsyncResponse,
+};
 use crate::FluvioError;
-use crate::sockets::ClientConfig;
 use crate::sync::MetadataStores;
-use crate::sockets::VersionedSerialSocket;
-use crate::sockets::Versions;
 
 const DEFAULT_STREAM_QUEUE_SIZE: usize = 10;
 
@@ -83,6 +83,9 @@ impl SpuSocket {
     ) -> Result<AsyncResponse<R>, FluvioError> {
         let mut req_msg = RequestMessage::new_request(request);
         req_msg.header.set_api_version(version);
+        req_msg
+            .header
+            .set_client_id(self.config.client_id().to_owned());
         self.socket
             .create_stream(req_msg, DEFAULT_STREAM_QUEUE_SIZE)
             .await
@@ -123,10 +126,10 @@ impl SpuPool {
         let mut client_config = self.config.with_prefix_sni_domain(spu.key());
 
         let spu_addr = match spu.spec.public_endpoint_local {
-            Some(local) if self.config.use_spu_local_address => {
+            Some(local) if self.config.use_spu_local_address() => {
                 let host = local.host;
                 let port = local.port;
-                format!("{}:{}", host, port)
+                format!("{host}:{port}")
             }
             _ => spu.spec.public_endpoint.addr(),
         };
@@ -166,7 +169,7 @@ impl SpuPool {
     }
 
     pub async fn topic_exists<S: Into<String>>(&self, topic: S) -> Result<bool, FluvioError> {
-        let replica = ReplicaKey::new(topic, 0);
+        let replica = ReplicaKey::new(topic, 0u32);
         Ok(self
             .metadata
             .partitions()

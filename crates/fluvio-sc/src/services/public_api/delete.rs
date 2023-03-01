@@ -4,11 +4,9 @@
 //! Delete topic request handler. Lookup topic in local metadata, grab its K8 context
 //! and send K8 a delete message.
 //!
-use std::io::Error;
-
 use tracing::{instrument, trace, debug};
+use anyhow::Result;
 
-use fluvio_protocol::link::ErrorCode;
 use fluvio_protocol::api::{RequestMessage, ResponseMessage};
 use fluvio_sc_schema::{Status};
 use fluvio_sc_schema::objects::{ObjectApiDeleteRequest};
@@ -21,7 +19,7 @@ use crate::services::auth::AuthServiceContext;
 pub async fn handle_delete_request<AC: AuthContext>(
     request: RequestMessage<ObjectApiDeleteRequest>,
     auth_ctx: &AuthServiceContext<AC>,
-) -> Result<ResponseMessage<Status>, Error> {
+) -> Result<ResponseMessage<Status>> {
     let (header, del_req) = request.get_header_request();
 
     debug!(?del_req, "del request");
@@ -36,25 +34,11 @@ pub async fn handle_delete_request<AC: AuthContext>(
         ObjectApiDeleteRequest::SpuGroup(req) => {
             super::spg::handle_delete_spu_group(req.key(), auth_ctx).await?
         }
-        ObjectApiDeleteRequest::ManagedConnector(req) => {
-            super::connector::handle_delete_managed_connector(req.key(), auth_ctx).await?
-        }
         ObjectApiDeleteRequest::SmartModule(req) => {
             super::smartmodule::handle_delete_smartmodule(req.key(), auth_ctx).await?
         }
         ObjectApiDeleteRequest::TableFormat(req) => {
             super::tableformat::handle_delete_tableformat(req.key(), auth_ctx).await?
-        }
-        ObjectApiDeleteRequest::DerivedStream(req) => {
-            let name = req.key();
-            delete_handler::process(
-                name.clone(),
-                auth_ctx,
-                auth_ctx.global_ctx.derivedstreams(),
-                |_| ErrorCode::DerivedStreamObjectError,
-                || ErrorCode::SmartModuleNotFound { name },
-            )
-            .await?
         }
     };
 

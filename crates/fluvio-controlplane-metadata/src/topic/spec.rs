@@ -11,11 +11,12 @@ use std::io::{Error, ErrorKind};
 use std::collections::BTreeMap;
 use std::ops::Deref;
 
+use tracing::{trace};
+
 use fluvio_types::defaults::{
     STORAGE_RETENTION_SECONDS, SPU_LOG_LOG_SEGMENT_MAX_BYTE_MIN, STORAGE_RETENTION_SECONDS_MIN,
     SPU_PARTITION_MAX_BYTES_MIN, SPU_LOG_SEGMENT_MAX_BYTES,
 };
-use tracing::{trace, debug};
 use fluvio_types::{ReplicaMap, SpuId};
 use fluvio_types::{PartitionId, PartitionCount, ReplicationFactor, IgnoreRackAssignment};
 
@@ -23,65 +24,37 @@ use fluvio_protocol::Version;
 use fluvio_protocol::bytes::{Buf, BufMut};
 use fluvio_protocol::{Encoder, Decoder};
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Encoder, Decoder)]
 #[cfg_attr(
     feature = "use_serde",
     derive(serde::Serialize, serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
 pub struct TopicSpec {
-    #[cfg_attr(feature = "use_serde", serde(flatten))]
-    inner: TopicSpecInner,
+    replicas: ReplicaSpec,
+    #[fluvio(min_version = 3)]
+    cleanup_policy: Option<CleanupPolicy>,
+    #[fluvio(min_version = 4)]
+    storage: Option<TopicStorageConfig>,
+    #[cfg_attr(feature = "use_serde", serde(default))]
+    #[fluvio(min_version = 6)]
+    compression_type: CompressionAlgorithm,
+}
+
+impl From<ReplicaSpec> for TopicSpec {
+    fn from(replicas: ReplicaSpec) -> Self {
+        Self {
+            replicas,
+            ..Default::default()
+        }
+    }
 }
 
 impl Deref for TopicSpec {
     type Target = ReplicaSpec;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner.replicas
-    }
-}
-
-impl Encoder for TopicSpec {
-    fn write_size(&self, version: Version) -> usize {
-        // classic topic
-        if version < 3 {
-            self.inner.replicas.write_size(version)
-        } else {
-            self.inner.write_size(version)
-        }
-    }
-
-    fn encode<T>(&self, dest: &mut T, version: Version) -> Result<(), Error>
-    where
-        T: BufMut,
-    {
-        // classic topic
-        if version < 3 {
-            self.inner.replicas.encode(dest, version)
-        } else {
-            self.inner.encode(dest, version)
-        }
-    }
-}
-
-impl Decoder for TopicSpec {
-    fn decode<T>(&mut self, src: &mut T, version: Version) -> Result<(), Error>
-    where
-        T: Buf,
-    {
-        if version < 3 {
-            debug!("decoding classic TopicSpec");
-            let mut replicas = ReplicaSpec::default();
-            replicas.decode(src, version)?;
-            self.inner.replicas = replicas;
-        } else {
-            let mut inner = TopicSpecInner::default();
-            inner.decode(src, version)?;
-            self.inner = inner;
-        }
-
-        Ok(())
+        &self.replicas
     }
 }
 
@@ -91,10 +64,8 @@ impl TopicSpec {
         J: Into<PartitionMaps>,
     {
         Self {
-            inner: TopicSpecInner {
-                replicas: ReplicaSpec::new_assigned(partition_map),
-                ..Default::default()
-            },
+            replicas: ReplicaSpec::new_assigned(partition_map),
+            ..Default::default()
         }
     }
 
@@ -104,44 +75,42 @@ impl TopicSpec {
         ignore_rack: Option<IgnoreRackAssignment>,
     ) -> Self {
         Self {
-            inner: TopicSpecInner {
-                replicas: ReplicaSpec::new_computed(partitions, replication, ignore_rack),
-                ..Default::default()
-            },
+            replicas: ReplicaSpec::new_computed(partitions, replication, ignore_rack),
+            ..Default::default()
         }
     }
 
     #[inline(always)]
     pub fn replicas(&self) -> &ReplicaSpec {
-        &self.inner.replicas
+        &self.replicas
     }
 
     pub fn set_cleanup_policy(&mut self, policy: CleanupPolicy) {
-        self.inner.cleanup_policy = Some(policy);
+        self.cleanup_policy = Some(policy);
     }
 
     pub fn get_clean_policy(&self) -> Option<&CleanupPolicy> {
-        self.inner.cleanup_policy.as_ref()
+        self.cleanup_policy.as_ref()
     }
 
     pub fn set_compression_type(&mut self, compression: CompressionAlgorithm) {
-        self.inner.compression_type = compression;
+        self.compression_type = compression;
     }
 
     pub fn get_compression_type(&self) -> &CompressionAlgorithm {
-        &self.inner.compression_type
+        &self.compression_type
     }
 
     pub fn get_storage(&self) -> Option<&TopicStorageConfig> {
-        self.inner.storage.as_ref()
+        self.storage.as_ref()
     }
 
     pub fn get_storage_mut(&mut self) -> Option<&mut TopicStorageConfig> {
-        self.inner.storage.as_mut()
+        self.storage.as_mut()
     }
 
     pub fn set_storage(&mut self, storage: TopicStorageConfig) {
-        self.inner.storage = Some(storage);
+        self.storage = Some(storage);
     }
 
     /// get retention secs that can be displayed
@@ -167,57 +136,26 @@ impl TopicSpec {
             if let Some(segment_size) = storage.segment_size {
                 if segment_size < SPU_LOG_LOG_SEGMENT_MAX_BYTE_MIN {
                     return Some(format!(
-                        "segment_size {} is less than minimum {}",
-                        segment_size, SPU_LOG_LOG_SEGMENT_MAX_BYTE_MIN
+                        "segment_size {segment_size} is less than minimum {SPU_LOG_LOG_SEGMENT_MAX_BYTE_MIN}"
                     ));
                 }
             }
             if let Some(max_partition_size) = storage.max_partition_size {
                 if max_partition_size < SPU_PARTITION_MAX_BYTES_MIN {
                     return Some(format!(
-                        "max_partition_size {} is less than minimum {}",
-                        max_partition_size, SPU_PARTITION_MAX_BYTES_MIN
+                        "max_partition_size {max_partition_size} is less than minimum {SPU_PARTITION_MAX_BYTES_MIN}"
                     ));
                 }
                 let segment_size = storage.segment_size.unwrap_or(SPU_LOG_SEGMENT_MAX_BYTES);
                 if max_partition_size < segment_size as u64 {
                     return Some(format!(
-                        "max_partition_size {} is less than segment size {}",
-                        max_partition_size, segment_size
+                        "max_partition_size {max_partition_size} is less than segment size {segment_size}"
                     ));
                 }
             }
         }
 
         None
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Default, Encoder, Decoder)]
-#[cfg_attr(
-    feature = "use_serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-pub(crate) struct TopicSpecInner {
-    replicas: ReplicaSpec,
-    #[fluvio(min_version = 3)]
-    cleanup_policy: Option<CleanupPolicy>,
-    #[fluvio(min_version = 4)]
-    storage: Option<TopicStorageConfig>,
-    #[cfg_attr(feature = "use_serde", serde(default))]
-    #[fluvio(min_version = 6)]
-    compression_type: CompressionAlgorithm,
-}
-
-impl From<ReplicaSpec> for TopicSpec {
-    fn from(replicas: ReplicaSpec) -> Self {
-        Self {
-            inner: TopicSpecInner {
-                replicas,
-                ..Default::default()
-            },
-        }
     }
 }
 
@@ -233,8 +171,8 @@ pub enum ReplicaSpec {
 impl std::fmt::Display for ReplicaSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Assigned(partition_map) => write!(f, "assigned::{}", partition_map),
-            Self::Computed(param) => write!(f, "computed::({})", param),
+            Self::Assigned(partition_map) => write!(f, "assigned::{partition_map}"),
+            Self::Computed(param) => write!(f, "computed::({param})"),
         }
     }
 }
@@ -336,13 +274,6 @@ impl ReplicaSpec {
 
     /// Validate partitions
     pub fn valid_partition(partitions: &PartitionCount) -> Result<(), Error> {
-        if *partitions < 0 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "partition is mandatory for computed topics",
-            ));
-        }
-
         if *partitions == 0 {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -355,13 +286,6 @@ impl ReplicaSpec {
 
     /// Validate replication factor
     pub fn valid_replication_factor(replication: &ReplicationFactor) -> Result<(), Error> {
-        if *replication < 0 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "replication factor is mandatory for computed topics",
-            ));
-        }
-
         if *replication == 0 {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -402,7 +326,7 @@ impl Decoder for ReplicaSpec {
             // Unexpected type
             _ => Err(Error::new(
                 ErrorKind::UnexpectedEof,
-                format!("unknown replica type {}", typ),
+                format!("unknown replica type {typ}"),
             )),
         }
     }
@@ -477,7 +401,7 @@ pub struct TopicReplicaParam {
 }
 
 #[allow(dead_code)]
-fn default_count() -> i32 {
+fn default_count() -> u32 {
     1
 }
 
@@ -525,8 +449,8 @@ impl From<Vec<PartitionMap>> for PartitionMaps {
     }
 }
 
-impl From<Vec<(i32, Vec<i32>)>> for PartitionMaps {
-    fn from(partition_vec: Vec<(i32, Vec<i32>)>) -> Self {
+impl From<Vec<(PartitionId, Vec<SpuId>)>> for PartitionMaps {
+    fn from(partition_vec: Vec<(PartitionId, Vec<SpuId>)>) -> Self {
         let maps: Vec<PartitionMap> = partition_vec
             .into_iter()
             .map(|(id, replicas)| PartitionMap { id, replicas })
@@ -556,11 +480,9 @@ impl PartitionMaps {
 
     fn replication_factor(&self) -> Option<ReplicationFactor> {
         // compute replication form replica map
-        if !self.maps.is_empty() {
-            Some(self.maps[0].replicas.len() as i32)
-        } else {
-            None
-        }
+        self.maps
+            .first()
+            .map(|partition| partition.replicas.len() as ReplicationFactor)
     }
 
     fn partition_map_string(&self) -> String {
@@ -601,7 +523,7 @@ impl PartitionMaps {
         let mut replica_map: ReplicaMap = BTreeMap::new();
 
         for partition in &self.maps {
-            replica_map.insert(partition.id, partition.replicas.clone());
+            replica_map.insert(partition.id as PartitionId, partition.replicas.clone());
         }
 
         replica_map
@@ -661,8 +583,7 @@ impl PartitionMaps {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
                         format!(
-                            "all assigned replicas must have the same number of spu ids: {}",
-                            replica_len
+                            "all assigned replicas must have the same number of spu ids: {replica_len}"
                         ),
                     ));
                 }
@@ -678,10 +599,7 @@ impl PartitionMaps {
             if partition.replicas.len() != unique_count {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
-                    format!(
-                        "duplicate spu ids found in assigned partition with id: {}",
-                        id
-                    ),
+                    format!("duplicate spu ids found in assigned partition with id: {id}"),
                 ));
             }
 
@@ -690,10 +608,7 @@ impl PartitionMaps {
                 if *spu_id < 0 {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
-                        format!(
-                            "invalid spu id: {} in assigned partition with id: {}",
-                            spu_id, id
-                        ),
+                        format!("invalid spu id: {spu_id} in assigned partition with id: {id}"),
                     ));
                 }
             }
@@ -841,14 +756,6 @@ pub mod test {
 
     #[test]
     fn test_valid_computed_replica_params() {
-        // -1 indicates an unassigned partition
-        let t1_result = ReplicaSpec::valid_partition(&-1);
-        assert!(t1_result.is_err());
-        assert_eq!(
-            format!("{}", t1_result.unwrap_err()),
-            "partition is mandatory for computed topics"
-        );
-
         // 0 is not a valid partition
         let t2_result = ReplicaSpec::valid_partition(&0);
         assert!(t2_result.is_err());
@@ -859,14 +766,6 @@ pub mod test {
 
         let t3_result = ReplicaSpec::valid_partition(&1);
         assert!(t3_result.is_ok());
-
-        // -1 indicates an unassigned replication factor
-        let t4_result = ReplicaSpec::valid_replication_factor(&-1);
-        assert!(t4_result.is_err());
-        assert_eq!(
-            format!("{}", t4_result.unwrap_err()),
-            "replication factor is mandatory for computed topics"
-        );
 
         // 0 is not a valid replication factor
         let t5_result = ReplicaSpec::valid_replication_factor(&0);
@@ -990,7 +889,7 @@ pub mod test {
             vec![(0, vec![0, 1, 3]), (1, vec![0, 2, 3]), (2, vec![1, 3, 4])].into();
 
         let p1_result = p1.unique_spus_in_partition_map();
-        let expected_p1_result: Vec<i32> = vec![0, 1, 3, 2, 4];
+        let expected_p1_result: Vec<SpuId> = vec![0, 1, 3, 2, 4];
         assert_eq!(p1_result, expected_p1_result);
     }
 
@@ -1036,7 +935,7 @@ pub mod test {
                     .into()
                 );
             }
-            _ => panic!("expect assigned topic spec, found {:?}", topic_spec_decoded),
+            _ => panic!("expect assigned topic spec, found {topic_spec_decoded:?}"),
         }
     }
 
@@ -1068,7 +967,7 @@ pub mod test {
                 assert_eq!(param.replication_factor, 3);
                 assert!(param.ignore_rack_assignment);
             }
-            _ => panic!("expect computed topic spec, found {:?}", topic_spec_decoded),
+            _ => panic!("expect computed topic spec, found {topic_spec_decoded:?}"),
         }
     }
 

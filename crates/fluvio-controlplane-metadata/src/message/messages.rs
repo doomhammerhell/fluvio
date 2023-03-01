@@ -1,7 +1,7 @@
 //!
-//! # Smart Module Messages
+//! # SmartModule Messages
 //!
-//! Smart Modules are sent from SC to all SPUs.
+//! SmartModules are sent from SC to all SPUs.
 //!
 use std::fmt::{self, Display};
 use std::fmt::Debug;
@@ -25,7 +25,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[")?;
         for sm in &self.messages {
-            write!(f, "{},", sm)?;
+            write!(f, "{sm},")?;
         }
         write!(f, "]")
     }

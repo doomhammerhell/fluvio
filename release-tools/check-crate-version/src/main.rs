@@ -72,6 +72,7 @@ async fn main() {
         let status = status.await.unwrap();
         crate_status.insert(crate_name, status);
     }
+    let mut version_needs_bump = false;
     for (crate_name, status) in crate_status.into_iter() {
         match status {
             CrateStatus::VersionBumped(manifest_diff) => {
@@ -88,13 +89,18 @@ async fn main() {
                 if let Some(manifest_diff) = manifest_diff {
                     println!("{manifest_diff}");
                 }
+                version_needs_bump = true;
             },
             CrateStatus::ManifestChanged(manifest_diff) => {
                 println!("⛔ {crate_name:-padding$} Manifest (Cargo.toml) changed but version number did not:");
                 print!("{manifest_diff}");
+                version_needs_bump = true;
             },
             CrateStatus::NotPublished => println!("🟡 {crate_name:-padding$} Crate not found in crates.io (Possible cause: Not published yet?)"),
         }
+    }
+    if version_needs_bump {
+        panic!("Some of the crates need version bump");
     }
 }
 
@@ -176,7 +182,7 @@ impl Manifests {
 
         let local_text = fs::read_to_string(&local_path)
             .unwrap_or_else(|_| panic!("{} not found", local_path.display()));
-        let crates_io_text = fs::read_to_string(&crates_io_path).unwrap();
+        let crates_io_text = fs::read_to_string(crates_io_path).unwrap();
 
         let local = toml::from_str::<toml::Value>(&local_text).unwrap();
         let crates_io = toml::from_str::<toml::Value>(&crates_io_text).unwrap();

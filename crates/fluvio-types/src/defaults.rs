@@ -37,6 +37,7 @@ pub const SPU_LOG_SIZE: &str = "10Gi";
 pub const SPU_LOG_INDEX_MAX_BYTES: u32 = 10485760;
 pub const SPU_LOG_INDEX_MAX_INTERVAL_BYTES: u32 = 4096;
 pub const SPU_LOG_SEGMENT_MAX_BYTES: u32 = 1073741824;
+pub const SPU_MONITORING_UNIX_SOCKET: &str = "/tmp/fluvio-spu.sock";
 
 pub const SPU_PARTITION_MAX_BYTES: u64 = 107_374_182_400; //100Gb
 pub const SPU_PARTITION_MAX_BYTES_MIN: u64 = SPU_LOG_LOG_SEGMENT_MAX_BYTE_MIN as u64 * 2;
@@ -54,6 +55,8 @@ pub const STORAGE_MAX_BATCH_SIZE: u32 = 33_554_432;
 pub const CLI_PROFILES_DIR: &str = "profiles";
 pub const CLI_DEFAULT_PROFILE: &str = "default";
 pub const CLI_CONFIG_PATH: &str = ".fluvio";
+pub const TLS_CLIENT_SECRET_NAME: &str = "fluvio-client-tls";
+pub const TLS_SERVER_SECRET_NAME: &str = "fluvio-tls";
 
 // Env
 pub const FLV_FLUVIO_HOME: &str = "FLUVIO_HOME";

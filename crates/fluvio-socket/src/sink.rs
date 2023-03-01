@@ -59,7 +59,7 @@ impl FluvioSink {
     where
         RequestMessage<R>: FlvEncoder + Default + Debug,
     {
-        (&mut self.inner).send((req_msg, 0)).await?;
+        self.inner.send((req_msg, 0)).await?;
         Ok(())
     }
 
@@ -74,7 +74,7 @@ impl FluvioSink {
         ResponseMessage<P>: FlvEncoder + Default + Debug,
     {
         trace!("sending response {:#?}", &resp_msg);
-        (&mut self.inner).send((resp_msg, version)).await?;
+        self.inner.send((resp_msg, version)).await?;
         Ok(())
     }
 }
@@ -114,7 +114,7 @@ mod file {
             &mut self,
             msg: &T,
             version: Version,
-        ) -> Result<(), SocketError>
+        ) -> Result<usize, SocketError>
         where
             T: FileWrite,
         {
@@ -129,8 +129,13 @@ mod file {
         }
 
         /// write store values to socket
-        async fn write_store_values(&mut self, values: Vec<StoreValue>) -> Result<(), SocketError> {
+        async fn write_store_values(
+            &mut self,
+            values: Vec<StoreValue>,
+        ) -> Result<usize, SocketError> {
             trace!("writing store values to socket values: {}", values.len());
+
+            let mut total_bytes_written = 0usize;
 
             for value in values {
                 match value {
@@ -143,6 +148,7 @@ mod file {
                             .get_mut()
                             .write_all(&bytes)
                             .await?;
+                        total_bytes_written += bytes.len();
                     }
                     StoreValue::FileSlice(f_slice) => {
                         if f_slice.is_empty() {
@@ -154,16 +160,21 @@ mod file {
                                 f_slice.len()
                             );
                             let writer = ZeroCopy::raw(self.fd);
-                            writer.copy_slice(&f_slice).await.map_err(|err| {
-                                IoError::new(ErrorKind::Other, format!("zero copy failed: {}", err))
-                            })?;
-                            trace!("finish writing file slice");
+                            let bytes_written =
+                                writer.copy_slice(&f_slice).await.map_err(|err| {
+                                    IoError::new(
+                                        ErrorKind::Other,
+                                        format!("zero copy failed: {err}"),
+                                    )
+                                })?;
+                            trace!("finish writing file slice with {bytes_written} bytes");
+                            total_bytes_written += bytes_written;
                         }
                     }
                 }
             }
 
-            Ok(())
+            Ok(total_bytes_written)
         }
     }
 }
@@ -264,7 +275,7 @@ mod tests {
         let mut out = vec![];
         let len: i32 = TEXT_LEN as i32 + 2; // msg plus file
         len.encode(&mut out, 0).expect("encode"); // codec len
-        out.put_u16(TEXT_LEN as u16); // string message len
+        out.put_u16(TEXT_LEN); // string message len
 
         raw_tcp_sink.get_mut().get_mut().write_all(&out).await?;
 
@@ -304,7 +315,7 @@ mod tests {
     #[fluvio_future::test]
     async fn test_sink_copy() {
         let port = portpicker::pick_unused_port().expect("No free ports left");
-        let addr = format!("127.0.0.1:{}", port);
+        let addr = format!("127.0.0.1:{port}");
 
         let _r = join(setup_client(&addr), test_server(&addr)).await;
     }

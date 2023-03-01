@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, debug, instrument};
 use event_listener::{Event, EventListener};
 use futures_util::stream::StreamExt;
+use anyhow::Result;
 
 use fluvio_protocol::Encoder;
 use fluvio_protocol::Decoder;
@@ -14,9 +15,7 @@ use fluvio_socket::AsyncResponse;
 use fluvio_sc_schema::objects::{
     Metadata, MetadataUpdate, ObjectApiWatchRequest, ObjectApiWatchResponse, WatchResponse,
 };
-use fluvio_sc_schema::{AdminSpec};
-
-use crate::metadata::core::Spec;
+use fluvio_sc_schema::AdminSpec;
 
 use super::StoreContext;
 use super::CacheMetadataStoreObject;
@@ -51,7 +50,7 @@ impl SimpleEvent {
 
 /// Synchronize metadata from SC
 pub struct MetadataSyncController<S: AdminSpec> {
-    store: StoreContext<S::WatchResponseType>,
+    store: StoreContext<S>,
     shutdown: Arc<SimpleEvent>,
 }
 
@@ -59,25 +58,22 @@ impl<S> MetadataSyncController<S>
 where
     S: AdminSpec + 'static + Sync + Send,
     AsyncResponse<ObjectApiWatchRequest>: Send,
-    S::WatchResponseType: Encoder + Decoder + Send + Sync,
-    <S::WatchResponseType as Spec>::Status: Sync + Send + Encoder + Decoder,
-    <S::WatchResponseType as Spec>::IndexKey: Display + Sync + Send,
+    S: Encoder + Decoder + Send + Sync,
+    S::Status: Sync + Send + Encoder + Decoder,
+    S::IndexKey: Display + Sync + Send,
     <WatchResponse<S> as TryFrom<ObjectApiWatchResponse>>::Error: Display + Send,
-    CacheMetadataStoreObject<S::WatchResponseType>: TryFrom<Metadata<S::WatchResponseType>>,
+    CacheMetadataStoreObject<S>: TryFrom<Metadata<S>>,
     WatchResponse<S>: TryFrom<ObjectApiWatchResponse>,
-    <Metadata<S::WatchResponseType> as TryInto<CacheMetadataStoreObject<S::WatchResponseType>>>::Error: Display,
+    <Metadata<S> as TryInto<CacheMetadataStoreObject<S>>>::Error: Display,
 {
     pub fn start(
-        store: StoreContext<S::WatchResponseType>,
+        store: StoreContext<S>,
         watch_response: AsyncResponse<ObjectApiWatchRequest>,
         shutdown: Arc<SimpleEvent>,
     ) {
         use fluvio_future::task::spawn;
 
-        let controller = Self {
-            store,
-            shutdown,
-        };
+        let controller = Self { store, shutdown };
 
         debug!(spec = %S::LABEL, "spawning sync controller");
         spawn(controller.dispatch_loop(watch_response));
@@ -89,10 +85,7 @@ where
             spec = S::LABEL,
         )
     )]
-    async fn dispatch_loop(
-        mut self,
-        mut response: AsyncResponse<ObjectApiWatchRequest>,
-    ) {
+    async fn dispatch_loop(mut self, mut response: AsyncResponse<ObjectApiWatchRequest>) {
         use tokio::select;
 
         debug!("{} starting dispatch loop", S::LABEL);
@@ -151,19 +144,16 @@ where
             spec = %S::LABEL,
         ),
     )]
-    async fn sync_metadata(
-        &mut self,
-        updates: MetadataUpdate<S::WatchResponseType>,
-    ) -> Result<(), IoError> {
+    async fn sync_metadata(&mut self, updates: MetadataUpdate<S>) -> Result<(), IoError> {
         // Full sync
         if !updates.all.is_empty() {
             debug!(
                 count = updates.all.len(),
                 "Received full sync, setting store objects:"
             );
-            let mut objects: Vec<CacheMetadataStoreObject<S::WatchResponseType>> = vec![];
+            let mut objects: Vec<CacheMetadataStoreObject<S>> = vec![];
             for meta in updates.all.into_iter() {
-                let store_obj: Result<CacheMetadataStoreObject<S::WatchResponseType>, _> = meta.try_into();
+                let store_obj: Result<CacheMetadataStoreObject<S>, _> = meta.try_into();
                 match store_obj {
                     Ok(obj) => {
                         objects.push(obj);
@@ -171,7 +161,7 @@ where
                     Err(err) => {
                         return Err(IoError::new(
                             ErrorKind::InvalidData,
-                            format!("problem converting: {}", err),
+                            format!("problem converting: {err}"),
                         ));
                     }
                 }
@@ -191,12 +181,12 @@ where
                 .into_iter()
                 .map(|msg| {
                     let (meta, typ) = (msg.content, msg.header);
-                    let obj: Result<CacheMetadataStoreObject<S::WatchResponseType>, _> = meta.try_into();
+                    let obj: Result<CacheMetadataStoreObject<S>, _> = meta.try_into();
                     obj.map(|it| (typ, it))
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| {
-                    IoError::new(ErrorKind::InvalidData, format!("problem converting: {}", e))
+                    IoError::new(ErrorKind::InvalidData, format!("problem converting: {e}"))
                 })?
                 .into_iter()
                 // .map(|it| LSUpdate::Mod(it))

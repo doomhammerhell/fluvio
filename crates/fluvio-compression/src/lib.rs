@@ -11,7 +11,7 @@ pub use error::CompressionError;
 use serde::{Serialize, Deserialize};
 
 /// The compression algorithm used to compress and decompress records in fluvio batches
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "lowercase")]
 #[repr(i8)]
 pub enum Compression {
@@ -36,8 +36,7 @@ impl TryFrom<i8> for Compression {
             2 => Ok(Compression::Snappy),
             3 => Ok(Compression::Lz4),
             _ => Err(CompressionError::UnknownCompressionFormat(format!(
-                "i8 representation: {}",
-                v
+                "i8 representation: {v}"
             ))),
         }
     }

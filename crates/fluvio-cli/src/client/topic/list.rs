@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use clap::Parser;
 use tracing::debug;
+use anyhow::Result;
 
 use fluvio::Fluvio;
 use fluvio::metadata::topic::TopicSpec;
 
 use crate::common::output::Terminal;
 use crate::common::OutputFormat;
-use crate::Result;
 
 // -----------------------------------
 // CLI Options
@@ -33,7 +33,7 @@ impl ListTopicsOpt {
         debug!("list topics {:#?} ", output_type);
         let admin = fluvio.admin().await;
 
-        let topics = admin.list::<TopicSpec, _>(vec![]).await?;
+        let topics = admin.all::<TopicSpec>().await?;
         display::format_response_output(out, topics, output_type)?;
         Ok(())
     }

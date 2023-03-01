@@ -5,12 +5,12 @@ use async_trait::async_trait;
 
 use tracing::debug;
 use clap::Parser;
+use anyhow::Result;
 
 use fluvio::Fluvio;
 use fluvio_extension_common::Terminal;
 use fluvio::metadata::smartmodule::SmartModuleSpec;
 
-use crate::Result;
 use crate::client::cmd::ClientCmd;
 use crate::error::CliError;
 
@@ -20,7 +20,7 @@ pub struct DeleteSmartModuleOpt {
     /// Continue deleting in case of an error
     #[clap(short, long, action, required = false)]
     continue_on_error: bool,
-    /// One or more name(s) of the smart module(s) to be deleted
+    /// One or more name(s) of the smartmodule(s) to be deleted
     #[clap(value_name = "name", required = true)]
     names: Vec<String>,
 }
@@ -35,30 +35,23 @@ impl ClientCmd for DeleteSmartModuleOpt {
         let admin = fluvio.admin().await;
         let mut err_happened = false;
         for name in self.names.iter() {
-            debug!(name, "deleting smart module");
+            debug!(name, "deleting smartmodule");
             if let Err(error) = admin.delete::<SmartModuleSpec, _>(name).await {
-                let error = CliError::from(error);
                 err_happened = true;
                 if self.continue_on_error {
-                    let user_error = match error.get_user_error() {
-                        Ok(usr_err) => usr_err.to_string(),
-                        Err(err) => format!("{}", err),
-                    };
-                    println!(
-                        "smart module \"{}\" delete failed with: {}",
-                        name, user_error
-                    );
+                    println!("smart module \"{name}\" delete failed with: {error}");
                 } else {
                     return Err(error);
                 }
             } else {
-                println!("smart module \"{}\" deleted", name);
+                println!("smartmodule \"{name}\" deleted");
             }
         }
         if err_happened {
             Err(CliError::CollectedError(
                 "Failed deleting smart module(s). Check previous errors.".to_string(),
-            ))
+            )
+            .into())
         } else {
             Ok(())
         }

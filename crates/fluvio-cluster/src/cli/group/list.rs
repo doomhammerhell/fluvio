@@ -4,14 +4,15 @@
 //!
 
 use std::sync::Arc;
+
 use clap::Parser;
+use anyhow::Result;
 
 use fluvio::Fluvio;
 use fluvio_controlplane_metadata::spg::SpuGroupSpec;
 
 use crate::cli::common::output::Terminal;
 use crate::cli::common::OutputFormat;
-use crate::cli::ClusterCliError;
 
 #[derive(Debug, Parser)]
 pub struct ListManagedSpuGroupsOpt {
@@ -21,13 +22,9 @@ pub struct ListManagedSpuGroupsOpt {
 
 impl ListManagedSpuGroupsOpt {
     /// Process list spus cli request
-    pub async fn process<O: Terminal>(
-        self,
-        out: Arc<O>,
-        fluvio: &Fluvio,
-    ) -> Result<(), ClusterCliError> {
+    pub async fn process<O: Terminal>(self, out: Arc<O>, fluvio: &Fluvio) -> Result<()> {
         let admin = fluvio.admin().await;
-        let lists = admin.list::<SpuGroupSpec, _>(vec![]).await?;
+        let lists = admin.all::<SpuGroupSpec>().await?;
 
         output::spu_group_response_to_output(out, lists, self.output.format)
     }
@@ -44,11 +41,11 @@ mod output {
     use comfy_table::CellAlignment;
     use tracing::debug;
     use serde::Serialize;
+    use anyhow::Result;
 
     use fluvio::metadata::objects::Metadata;
     use fluvio_controlplane_metadata::spg::SpuGroupSpec;
 
-    use crate::cli::ClusterCliError;
     use crate::cli::common::output::{OutputType, TableOutputHandler, Terminal};
     use crate::cli::common::t_println;
 
@@ -64,7 +61,7 @@ mod output {
         out: std::sync::Arc<O>,
         list_spu_groups: Vec<Metadata<SpuGroupSpec>>,
         output_type: OutputType,
-    ) -> Result<(), ClusterCliError> {
+    ) -> Result<()> {
         debug!("groups: {:#?}", list_spu_groups);
 
         if !list_spu_groups.is_empty() {
@@ -100,12 +97,12 @@ mod output {
                     let storage_config = spec.spu_config.real_storage_config();
                     Row::from([
                         Cell::new(&r.name).set_alignment(CellAlignment::Right),
-                        Cell::new(&spec.replicas.to_string()).set_alignment(CellAlignment::Center),
-                        Cell::new(&r.spec.min_id.to_string()).set_alignment(CellAlignment::Right),
-                        Cell::new(&spec.spu_config.rack.clone().unwrap_or_default())
+                        Cell::new(spec.replicas.to_string()).set_alignment(CellAlignment::Center),
+                        Cell::new(r.spec.min_id.to_string()).set_alignment(CellAlignment::Right),
+                        Cell::new(spec.spu_config.rack.clone().unwrap_or_default())
                             .set_alignment(CellAlignment::Right),
-                        Cell::new(&storage_config.size).set_alignment(CellAlignment::Right),
-                        Cell::new(&r.status.to_string()).set_alignment(CellAlignment::Right),
+                        Cell::new(storage_config.size).set_alignment(CellAlignment::Right),
+                        Cell::new(r.status.to_string()).set_alignment(CellAlignment::Right),
                     ])
                 })
                 .collect()

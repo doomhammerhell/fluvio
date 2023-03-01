@@ -12,7 +12,10 @@ use std::time::Duration;
 use tracing::debug;
 use clap::Parser;
 use humantime::parse_duration;
+use anyhow::Result;
 
+use fluvio_types::PartitionCount;
+use fluvio_types::ReplicationFactor;
 use fluvio::metadata::topic::CleanupPolicy;
 use fluvio::metadata::topic::ReplicaSpec;
 use fluvio::metadata::topic::SegmentBasedPolicy;
@@ -23,7 +26,7 @@ use fluvio_sc_schema::topic::validate::valid_topic_name;
 
 use fluvio::Fluvio;
 use fluvio::metadata::topic::TopicSpec;
-use crate::{Result, CliError};
+use crate::{CliError};
 
 #[derive(Debug, Parser)]
 pub struct CreateTopicOpt {
@@ -44,7 +47,7 @@ pub struct CreateTopicOpt {
         value_name = "partitions",
         default_value = "1"
     )]
-    partitions: i32,
+    partitions: PartitionCount,
 
     /// The number of full replicas of the Topic to keep
     ///
@@ -68,7 +71,7 @@ pub struct CreateTopicOpt {
     #[clap(
         short = 'i',
         long = "ignore-rack-assignment",
-        conflicts_with = "replica-assignment"
+        conflicts_with = "replica_assignment"
     )]
     ignore_rack_assignment: bool,
 
@@ -77,7 +80,7 @@ pub struct CreateTopicOpt {
         short = 'f',
         long = "replica-assignment",
         value_name = "file.json",
-        parse(from_os_str),
+        value_parser,
         conflicts_with = "partitions",
         conflicts_with = "replication"
     )]
@@ -99,7 +102,7 @@ impl CreateTopicOpt {
         debug!("creating topic: {} spec: {:#?}", name, topic_spec);
         let admin = fluvio.admin().await;
         admin.create(name.clone(), dry_run, topic_spec).await?;
-        println!("topic \"{}\" created", name);
+        println!("topic \"{name}\" created");
 
         Ok(())
     }
@@ -116,8 +119,7 @@ impl CreateTopicOpt {
                     IoError::new(
                         ErrorKind::InvalidInput,
                         format!(
-                            "cannot parse replica assignment file {:?}: {}",
-                            replica_assign_file, err
+                            "cannot parse replica assignment file {replica_assign_file:?}: {err}"
                         ),
                     )
                 },
@@ -125,7 +127,7 @@ impl CreateTopicOpt {
         } else {
             ReplicaSpec::Computed(TopicReplicaParam {
                 partitions: self.partitions,
-                replication_factor: self.replication as i32,
+                replication_factor: self.replication as ReplicationFactor,
                 ignore_rack_assignment: self.ignore_rack_assignment,
             })
         };
@@ -135,7 +137,8 @@ impl CreateTopicOpt {
             return Err(CliError::InvalidArg(
                 "Topic name must only contain lowercase alphanumeric characters or '-'."
                     .to_string(),
-            ));
+            )
+            .into());
         }
 
         let mut topic_spec: TopicSpec = replica_spec.into();
@@ -172,7 +175,7 @@ impl CreateTopicOpt {
 pub struct TopicConfigOpt {
     /// Retention time (round to seconds)
     /// Ex: '1h', '2d 10s', '7 days' (default)
-    #[clap(long, value_name = "time",parse(try_from_str = parse_duration))]
+    #[clap(long, value_name = "time",value_parser=parse_duration)]
     retention_time: Option<Duration>,
 
     /// Segment size (by default measured in bytes)
@@ -209,7 +212,7 @@ mod load {
         fn file_decode<T: AsRef<Path>>(path: T) -> Result<Self, IoError> {
             let file_str: String = read_to_string(path)?;
             serde_json::from_str(&file_str)
-                .map_err(|err| IoError::new(ErrorKind::InvalidData, format!("{}", err)))
+                .map_err(|err| IoError::new(ErrorKind::InvalidData, format!("{err}")))
         }
     }
 }

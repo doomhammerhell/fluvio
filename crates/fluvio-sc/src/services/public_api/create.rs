@@ -2,7 +2,6 @@ use std::io::Error as IoError;
 
 use tracing::{instrument, debug};
 
-use fluvio_protocol::link::ErrorCode;
 use fluvio_protocol::api::{RequestMessage, ResponseMessage};
 use fluvio_sc_schema::{Status};
 use fluvio_sc_schema::objects::{ObjectApiCreateRequest, ObjectCreateRequest};
@@ -13,7 +12,7 @@ use crate::services::auth::AuthServiceContext;
 /// Handler for create topic request
 #[instrument(skip(request, auth_context))]
 pub async fn handle_create_request<AC: AuthContext>(
-    request: RequestMessage<ObjectApiCreateRequest>,
+    request: Box<RequestMessage<ObjectApiCreateRequest>>,
     auth_context: &AuthServiceContext<AC>,
 ) -> Result<ResponseMessage<Status>, IoError> {
     let (header, obj_req) = request.get_header_request();
@@ -35,10 +34,6 @@ pub async fn handle_create_request<AC: AuthContext>(
             )
             .await
         }
-        ObjectCreateRequest::ManagedConnector(create) => {
-            super::connector::handle_create_managed_connector_request(common, create, auth_context)
-                .await?
-        }
         ObjectCreateRequest::SmartModule(create) => {
             super::smartmodule::handle_create_smartmodule_request(common, create, auth_context)
                 .await?
@@ -46,16 +41,6 @@ pub async fn handle_create_request<AC: AuthContext>(
         ObjectCreateRequest::TableFormat(create) => {
             super::tableformat::handle_create_tableformat_request(common, create, auth_context)
                 .await?
-        }
-        ObjectCreateRequest::DerivedStream(create) => {
-            create_handler::process(
-                common,
-                create,
-                auth_context,
-                auth_context.global_ctx.derivedstreams(),
-                |_| ErrorCode::DerivedStreamObjectError,
-            )
-            .await?
         }
     };
 

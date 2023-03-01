@@ -8,6 +8,7 @@ use std::str::Utf8Error;
 use bytes::Bytes;
 use bytes::BytesMut;
 use content_inspector::{inspect, ContentType};
+use fluvio_types::PartitionId;
 use tracing::{trace, warn};
 use once_cell::sync::Lazy;
 
@@ -50,6 +51,7 @@ static MAX_STRING_DISPLAY: Lazy<usize> = Lazy::new(|| {
 /// let key: RecordKey = String::from("Hello, world!").into();
 /// let key: RecordKey = vec![1, 2, 3, 4].into();
 /// ```
+#[derive(Hash)]
 pub struct RecordKey(RecordKeyInner);
 
 impl RecordKey {
@@ -72,6 +74,7 @@ impl RecordKey {
     }
 }
 
+#[derive(Hash)]
 enum RecordKeyInner {
     Null,
     Key(RecordData),
@@ -92,7 +95,7 @@ impl<K: Into<Vec<u8>>> From<K> for RecordKey {
 /// [the Producer API] as an example.
 ///
 /// [the Producer API]: https://docs.rs/fluvio/producer/TopicProducer::send
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq, Hash)]
 pub struct RecordData(Bytes);
 
 impl RecordData {
@@ -110,7 +113,7 @@ impl RecordData {
         if self.is_binary() {
             format!("binary: ({} bytes)", self.len())
         } else {
-            format!("text: '{}'", self)
+            format!("text: '{self}'")
         }
     }
 
@@ -549,7 +552,7 @@ pub struct ConsumerRecord<B = DefaultRecord> {
     /// The offset of this Record into its partition
     pub offset: i64,
     /// The partition where this Record is stored
-    pub partition: i32,
+    pub partition: PartitionId,
     /// The Record contents
     pub record: B,
     /// Timestamp base of batch in which the records is present
@@ -563,7 +566,7 @@ impl<B> ConsumerRecord<B> {
     }
 
     /// The partition where this Record is stored.
-    pub fn partition(&self) -> i32 {
+    pub fn partition(&self) -> PartitionId {
         self.partition
     }
 

@@ -2,33 +2,13 @@ use quote::quote;
 use proc_macro2::TokenStream;
 use crate::SmartModuleFn;
 
-pub fn generate_aggregate_smartmodule(func: &SmartModuleFn, has_params: bool) -> TokenStream {
+pub fn generate_aggregate_smartmodule(func: &SmartModuleFn) -> TokenStream {
     let user_code = &func.func;
     let user_fn = &func.name;
 
-    let params_parsing = if has_params {
-        quote!(
-            use std::convert::TryInto;
-
-            let params = match smartmodule_input.base.params.try_into(){
-                Ok(params) => params,
-                Err(err) => return SmartModuleInternalError::ParsingExtraParams as i32,
-            };
-
-        )
-    } else {
-        quote!()
-    };
-
-    let function_call = if has_params {
-        quote!(
-            super:: #user_fn(acc_data, &record, &params)
-        )
-    } else {
-        quote!(
-            super:: #user_fn(acc_data, &record)
-        )
-    };
+    let function_call = quote!(
+        super:: #user_fn(acc_data, &record)
+    );
 
     quote! {
 
@@ -41,8 +21,8 @@ pub fn generate_aggregate_smartmodule(func: &SmartModuleFn, has_params: bool) ->
             #[allow(clippy::missing_safety_doc)]
             pub unsafe fn aggregate(ptr: &mut u8, len: usize, version: i16) -> i32 {
                 use fluvio_smartmodule::dataplane::smartmodule::{
-                    SmartModuleAggregateInput, SmartModuleInternalError,
-                    SmartModuleRuntimeError, SmartModuleKind, SmartModuleOutput,SmartModuleAggregateOutput
+                    SmartModuleAggregateInput, SmartModuleTransformErrorStatus,
+                    SmartModuleTransformRuntimeError, SmartModuleKind, SmartModuleOutput,SmartModuleAggregateOutput
                 };
                 use fluvio_smartmodule::dataplane::core::{Encoder, Decoder};
                 use fluvio_smartmodule::dataplane::record::{Record, RecordData};
@@ -55,17 +35,16 @@ pub fn generate_aggregate_smartmodule(func: &SmartModuleFn, has_params: bool) ->
                 let mut smartmodule_input = SmartModuleAggregateInput::default();
                 // 13 is version for aggregate
                 if let Err(_err) = Decoder::decode(&mut smartmodule_input, &mut std::io::Cursor::new(input_data), version) {
-                    return SmartModuleInternalError::DecodingBaseInput as i32;
+                    return SmartModuleTransformErrorStatus::DecodingBaseInput as i32;
                 }
 
                 let mut accumulator = smartmodule_input.accumulator;
 
-                #params_parsing
-
-                let records_input = smartmodule_input.base.record_data;
+                let base_offset = smartmodule_input.base.base_offset();
+                let records_input = smartmodule_input.base.into_raw_bytes();
                 let mut records: Vec<Record> = vec![];
                 if let Err(_err) = Decoder::decode(&mut records, &mut std::io::Cursor::new(records_input), version) {
-                    return SmartModuleInternalError::DecodingRecords as i32;
+                    return SmartModuleTransformErrorStatus::DecodingRecords as i32;
                 };
 
                 // PROCESSING
@@ -74,7 +53,7 @@ pub fn generate_aggregate_smartmodule(func: &SmartModuleFn, has_params: bool) ->
                         successes: Vec::with_capacity(records.len()),
                         error: None,
                     },
-                    accumulator: Vec::new()
+                    accumulator: accumulator.clone(),
                 };
 
                 for mut record in records.into_iter() {
@@ -85,13 +64,13 @@ pub fn generate_aggregate_smartmodule(func: &SmartModuleFn, has_params: bool) ->
                         Ok(value) => {
                             accumulator = Vec::from(value.as_ref());
                             output.accumulator = accumulator.clone();
-                            record.value = RecordData::from(accumulator.clone());
+                            record.value = RecordData::from(output.accumulator.clone());
                             output.base.successes.push(record);
                         }
                         Err(err) => {
-                            let error = SmartModuleRuntimeError::new(
+                            let error = SmartModuleTransformRuntimeError::new(
                                 &record,
-                                smartmodule_input.base.base_offset,
+                                base_offset,
                                 SmartModuleKind::Aggregate,
                                 err,
                             );
@@ -106,7 +85,7 @@ pub fn generate_aggregate_smartmodule(func: &SmartModuleFn, has_params: bool) ->
                 // ENCODING
                 let mut out = vec![];
                 if let Err(_) = Encoder::encode(&mut output, &mut out, version) {
-                    return SmartModuleInternalError::EncodingOutput as i32;
+                    return SmartModuleTransformErrorStatus::EncodingOutput as i32;
                 }
 
                 let out_len = out.len();

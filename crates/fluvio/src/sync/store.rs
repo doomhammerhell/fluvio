@@ -3,20 +3,19 @@ use std::convert::TryInto;
 use std::fmt::Display;
 use std::sync::Arc;
 
+use tracing::{debug, instrument};
+use anyhow::Result;
+
 use fluvio_protocol::Decoder;
 use fluvio_protocol::Encoder;
 use fluvio_sc_schema::AdminSpec;
-use fluvio_sc_schema::core::Spec;
 use fluvio_sc_schema::objects::Metadata;
 use fluvio_sc_schema::objects::ObjectApiWatchRequest;
 use fluvio_sc_schema::objects::ObjectApiWatchResponse;
 use fluvio_sc_schema::objects::WatchRequest;
 use fluvio_sc_schema::objects::WatchResponse;
 use fluvio_socket::AsyncResponse;
-use tracing::{debug, instrument};
-
 use fluvio_socket::SharedMultiplexerSocket;
-use fluvio_socket::SocketError;
 
 use crate::metadata::topic::TopicSpec;
 use crate::metadata::spu::SpuSpec;
@@ -41,10 +40,7 @@ impl MetadataStores {
     /// start synchronization
 
     #[instrument(skip(socket))]
-    pub async fn start(
-        socket: SharedMultiplexerSocket,
-        watch_version: i16,
-    ) -> Result<Self, SocketError> {
+    pub async fn start(socket: SharedMultiplexerSocket, watch_version: i16) -> Result<Self> {
         debug!(watch_version, "starting metadata store");
         let store = Self {
             shutdown: SimpleEvent::shared(),
@@ -80,14 +76,14 @@ impl MetadataStores {
 
     /// start watch for spu
     #[instrument(skip(self))]
-    pub async fn start_watch_for_spu(&self) -> Result<(), SocketError> {
+    pub async fn start_watch_for_spu(&self) -> Result<()> {
         self.start_watch::<SpuSpec>(self.spus.clone()).await?;
 
         Ok(())
     }
 
     #[instrument(skip(self))]
-    pub async fn start_watch_for_partition(&self) -> Result<(), SocketError> {
+    pub async fn start_watch_for_partition(&self) -> Result<()> {
         self.start_watch::<PartitionSpec>(self.partitions.clone())
             .await?;
 
@@ -95,31 +91,26 @@ impl MetadataStores {
     }
 
     #[instrument(skip(self))]
-    pub async fn start_watch_for_topic(&self) -> Result<(), SocketError> {
+    pub async fn start_watch_for_topic(&self) -> Result<()> {
         self.start_watch::<TopicSpec>(self.topics.clone()).await?;
 
         Ok(())
     }
 
     #[instrument(skip(self, store))]
-    async fn start_watch<S>(
-        &self,
-        store: StoreContext<S::WatchResponseType>,
-    ) -> Result<(), SocketError>
+    async fn start_watch<S>(&self, store: StoreContext<S>) -> Result<()>
     // same bounds as MetadataSyncController
     where
         S: AdminSpec + 'static + Sync + Send,
         ObjectApiWatchRequest: From<WatchRequest<S>>,
         AsyncResponse<ObjectApiWatchRequest>: Send,
-        S::WatchResponseType: Encoder + Decoder + Send + Sync,
-        <S::WatchResponseType as Spec>::Status: Sync + Send + Encoder + Decoder,
-        <S::WatchResponseType as Spec>::IndexKey: Display + Sync + Send,
+        S: Encoder + Decoder + Send + Sync,
+        S::Status: Sync + Send + Encoder + Decoder,
+        S::IndexKey: Display + Sync + Send,
         <WatchResponse<S> as TryFrom<ObjectApiWatchResponse>>::Error: Display + Send,
-        CacheMetadataStoreObject<S::WatchResponseType>: TryFrom<Metadata<S::WatchResponseType>>,
+        CacheMetadataStoreObject<S>: TryFrom<Metadata<S>>,
         WatchResponse<S>: TryFrom<ObjectApiWatchResponse>,
-        <Metadata<S::WatchResponseType> as TryInto<
-            CacheMetadataStoreObject<S::WatchResponseType>,
-        >>::Error: Display,
+        <Metadata<S> as TryInto<CacheMetadataStoreObject<S>>>::Error: Display,
     {
         use fluvio_protocol::api::RequestMessage;
         use fluvio_sc_schema::objects::WatchRequest;

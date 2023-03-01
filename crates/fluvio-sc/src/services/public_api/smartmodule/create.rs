@@ -1,12 +1,12 @@
 //!
-//! # Create Smart Module Request
+//! # Create SmartModule Request
 //!
-//! Converts Smart Module API request into KV request and sends to KV store for processing.
+//! Converts SmartModule API request into KV request and sends to KV store for processing.
 //!
 
 use std::io::{Error, ErrorKind};
 
-use tracing::{info, trace, instrument};
+use tracing::{info, trace, debug, instrument};
 
 use fluvio_protocol::link::ErrorCode;
 use fluvio_sc_schema::{Status};
@@ -18,7 +18,7 @@ use fluvio_auth::{AuthContext, TypeAction};
 use crate::core::Context;
 use crate::services::auth::AuthServiceContext;
 
-/// Handler for smart module request
+/// Handler for smartmodule request
 #[instrument(skip(create, auth_ctx))]
 pub async fn handle_create_smartmodule_request<AC: AuthContext>(
     create: CommonCreateRequest,
@@ -27,7 +27,7 @@ pub async fn handle_create_smartmodule_request<AC: AuthContext>(
 ) -> Result<Status, Error> {
     let name = create.name;
 
-    info!(%name,"creating smart module");
+    info!(%name,"creating smartmodule");
 
     if let Ok(authorized) = auth_ctx
         .auth
@@ -47,27 +47,43 @@ pub async fn handle_create_smartmodule_request<AC: AuthContext>(
     }
 
     let status = process_smartmodule_request(&auth_ctx.global_ctx, name, spec).await;
-    trace!("create smart module response {:#?}", status);
+    trace!("create smartmodule response {:#?}", status);
 
     Ok(status)
 }
 
-/// Process custom smart module, converts smart module spec to K8 and sends to KV store
+/// Process custom smartmodule, converts smartmodule spec to K8 and sends to KV store
 #[instrument(skip(ctx, name, smartmodule_spec))]
 async fn process_smartmodule_request(
     ctx: &Context,
     name: String,
     smartmodule_spec: SmartModuleSpec,
 ) -> Status {
+    // if there is pkg associated with, we override name
+    let store_id = if let Some(meta) = &smartmodule_spec.meta {
+        if !meta.package.is_valid() {
+            return Status::new(
+                name,
+                ErrorCode::SmartModuleError,
+                Some("invalid SmartModule package".to_owned()),
+            );
+        }
+        meta.store_id()
+    } else {
+        name
+    };
+
+    debug!(%store_id, "creating smartmodule");
+
     if let Err(err) = ctx
         .smartmodules()
-        .create_spec(name.clone(), smartmodule_spec)
+        .create_spec(store_id.clone(), smartmodule_spec)
         .await
     {
         let error = Some(err.to_string());
-        Status::new(name, ErrorCode::SmartModuleError, error) // TODO: create error type
+        Status::new(store_id, ErrorCode::SmartModuleError, error) // TODO: create error type
     } else {
-        info!(%name, "smart module created");
-        Status::new_ok(name.clone())
+        info!(%store_id, "smartmodule created");
+        Status::new_ok(store_id.clone())
     }
 }
