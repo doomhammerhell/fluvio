@@ -50,10 +50,7 @@ pub const CHAIN_SMARTMODULE_API: i16 = 18;
 #[allow(deprecated)]
 #[derive(Decoder, Encoder, Default, Educe)]
 #[educe(Debug)]
-pub struct StreamFetchRequest<R>
-where
-    R: Encoder + Decoder + Default + Debug,
-{
+pub struct StreamFetchRequest<R> {
     pub topic: String,
     pub partition: PartitionId,
     pub fetch_offset: i64,
@@ -65,13 +62,11 @@ where
     #[fluvio(min_version = 11)]
     pub wasm_module: Vec<u8>,
     // TODO: remove in 0.10
-    #[fluvio(min_version = 12)]
-    #[fluvio(max_version = 18)]
+    #[fluvio(min_version = 12, max_version = 18)]
     pub wasm_payload: Option<LegacySmartModulePayload>,
-    #[fluvio(min_version = 16)]
-    #[fluvio(max_version = 18)]
+    #[fluvio(min_version = 16, max_version = 18)]
     pub smartmodule: Option<SmartModuleInvocation>,
-    #[fluvio(min_version = 16)]
+    #[fluvio(min_version = 16, max_version = 18)]
     pub derivedstream: Option<DerivedStreamInvocation>,
     #[fluvio(min_version = 18)]
     pub smartmodules: Vec<SmartModuleInvocation>,
@@ -95,10 +90,7 @@ pub struct DerivedStreamInvocation {
 }
 
 #[derive(Encoder, Decoder, Default, Debug)]
-pub struct StreamFetchResponse<R>
-where
-    R: Encoder + Decoder + Default + Debug,
-{
+pub struct StreamFetchResponse<R> {
     pub topic: String,
     pub stream_id: u32,
     pub partition: FetchablePartitionResponse<R>,

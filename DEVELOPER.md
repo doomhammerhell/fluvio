@@ -446,6 +446,8 @@ Please follow the [bats-core](https://bats-core.readthedocs.io/en/stable/install
 
 ### Running local smoke test
 
+This requires a running cluster.
+
 Perform smoke test using local cluster mode:
 
 ```
@@ -475,7 +477,7 @@ make smoke-test-k8
 Perform CLI smoke test against your running cluster (Kubernetes or local)
 
 ```
-make cli-smoke
+make cli-fluvio-smoke
 ```
 
 ## Troubleshooting
@@ -499,7 +501,6 @@ In certain cases, partition may not be deleted correctly.  In this case, you can
 ```
 kubectl patch partition  <partition_name> -p '{"metadata":{"finalizers":null}}' --type merge
 ```
-
 
  ## Optional: Download a published version of Fluvio
 

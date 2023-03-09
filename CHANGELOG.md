@@ -1,6 +1,6 @@
 # Release Notes
 
-## Platform Version 0.10.6 - UNRELEASED
+## Platform Version 0.10.6 - UNRELEASED 
 
 ## Platform Version 0.10.5 - 2023-02-28
 * Upload bpkg logic ([#3028](https://github.com/infinyon/fluvio/issues/3028))
