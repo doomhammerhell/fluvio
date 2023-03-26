@@ -15,16 +15,13 @@ use crate::store::actions::*;
 use crate::core::*;
 use crate::store::*;
 
-#[derive(Decoder, Encoder, Debug, Eq, PartialEq, Clone)]
+#[derive(Decoder, Default, Encoder, Debug, Eq, PartialEq, Clone)]
 pub enum MsgType {
+    #[default]
+    #[fluvio(tag = 0)]
     UPDATE,
+    #[fluvio(tag = 1)]
     DELETE,
-}
-
-impl ::std::default::Default for MsgType {
-    fn default() -> Self {
-        MsgType::UPDATE
-    }
 }
 
 #[derive(Decoder, Encoder, Debug, Eq, PartialEq, Clone, Default)]

@@ -33,15 +33,22 @@ impl fmt::Display for TopicStatus {
     }
 }
 
-#[derive(Decoder, Encoder, Debug, Clone, Eq, PartialEq)]
+#[derive(Decoder, Default, Encoder, Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "use_serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TopicResolution {
-    Init,                  // Initializing this is starting state.
-    Pending,               // Has valid config, ready for replica mapping assignment
+    #[default]
+    #[fluvio(tag = 0)]
+    Init, // Initializing this is starting state.
+    #[fluvio(tag = 1)]
+    Pending, // Has valid config, ready for replica mapping assignment
+    #[fluvio(tag = 2)]
     InsufficientResources, // Replica map cannot be created due to lack of capacity
-    InvalidConfig,         // Invalid configuration
-    Provisioned,           // All partitions has been provisioned
-    Deleting,              // Process of being deleted
+    #[fluvio(tag = 3)]
+    InvalidConfig, // Invalid configuration
+    #[fluvio(tag = 4)]
+    Provisioned, // All partitions has been provisioned
+    #[fluvio(tag = 5)]
+    Deleting, // Process of being deleted
 }
 
 impl TopicResolution {
@@ -108,12 +115,6 @@ impl ::std::default::Default for TopicStatus {
             replica_map: BTreeMap::new(),
             reason: "".to_owned(),
         }
-    }
-}
-
-impl ::std::default::Default for TopicResolution {
-    fn default() -> Self {
-        TopicResolution::Init
     }
 }
 

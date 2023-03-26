@@ -91,9 +91,7 @@ impl PackageInfo {
     }
 
     pub fn package_relative_path<P: AsRef<Path>>(&self, child: P) -> PathBuf {
-        let mut package_path = self.package_path().to_path_buf();
-        package_path.push(child);
-        package_path
+        self.package_path().join(child)
     }
 
     /// path to package's bin target
@@ -130,7 +128,6 @@ pub fn get_current_project_path() -> anyhow::Result<Option<PathBuf>> {
     for path in parents {
         if let Some(filename) = read_dir(path)
             .context("failed to read directory")?
-            .into_iter()
             .map(|p| p.unwrap().file_name())
             .find(|p| p.eq(&OsString::from("Cargo.toml")))
         {

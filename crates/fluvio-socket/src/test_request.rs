@@ -12,15 +12,11 @@ use fluvio_protocol::derive::{Decoder, Encoder};
 #[repr(u16)]
 #[derive(Encoder, Decoder, Eq, PartialEq, Debug, Clone, Copy)]
 #[fluvio(encode_discriminant)]
+#[derive(Default)]
 pub enum TestKafkaApiEnum {
+    #[default]
     Echo = 1000,
     Status = 1001,
-}
-
-impl Default for TestKafkaApiEnum {
-    fn default() -> TestKafkaApiEnum {
-        TestKafkaApiEnum::Echo
-    }
 }
 
 #[derive(Decoder, Encoder, Debug, Default)]
@@ -63,8 +59,11 @@ pub struct AsyncStatusResponse {
 
 #[derive(Encoder, Debug)]
 pub enum TestApiRequest {
+    #[fluvio(tag = 0)]
     EchoRequest(RequestMessage<EchoRequest>),
+    #[fluvio(tag = 1)]
     AsyncStatusRequest(RequestMessage<AsyncStatusRequest>),
+    #[fluvio(tag = 2)]
     Noop(bool),
 }
 

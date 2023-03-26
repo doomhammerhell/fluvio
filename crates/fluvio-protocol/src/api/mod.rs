@@ -167,16 +167,12 @@ mod common {
         }
     }
 
-    #[derive(Debug, Clone, Eq, PartialEq, Encoder, Decoder)]
+    #[derive(Debug, Default, Clone, Eq, PartialEq, Encoder, Decoder)]
     #[non_exhaustive]
     pub enum RequestKind {
+        #[default]
+        #[fluvio(tag = 0)]
         Produce,
-    }
-
-    impl Default for RequestKind {
-        fn default() -> Self {
-            RequestKind::Produce
-        }
     }
 
     impl Display for RequestKind {

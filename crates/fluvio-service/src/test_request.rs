@@ -24,15 +24,11 @@ use crate::{FluvioService, ConnectInfo};
 #[repr(u16)]
 #[derive(PartialEq, Debug, Encoder, Decoder, Clone, Copy)]
 #[fluvio(encode_discriminant)]
+#[derive(Default)]
 pub(crate) enum TestKafkaApiEnum {
+    #[default]
     Echo = 1000,
     Save = 1001,
-}
-
-impl Default for TestKafkaApiEnum {
-    fn default() -> TestKafkaApiEnum {
-        TestKafkaApiEnum::Echo
-    }
 }
 
 #[derive(Decoder, Encoder, Debug, Default)]
@@ -68,7 +64,9 @@ pub(crate) struct SaveResponse {}
 
 #[derive(Debug, Encoder)]
 pub(crate) enum TestApiRequest {
+    #[fluvio(tag = 0)]
     EchoRequest(RequestMessage<EchoRequest>),
+    #[fluvio(tag = 1)]
     SaveRequest(RequestMessage<SaveRequest>),
 }
 

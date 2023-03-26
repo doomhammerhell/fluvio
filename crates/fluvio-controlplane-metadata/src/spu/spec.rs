@@ -329,30 +329,25 @@ impl Endpoint {
     }
 }
 
-#[derive(Decoder, Encoder, Debug, Clone, Eq, PartialEq)]
+#[derive(Default, Decoder, Encoder, Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "use_serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EncryptionEnum {
+    #[default]
+    #[fluvio(tag = 0)]
     PLAINTEXT,
+    #[fluvio(tag = 1)]
     SSL,
 }
 
-impl Default for EncryptionEnum {
-    fn default() -> Self {
-        EncryptionEnum::PLAINTEXT
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Encoder, Decoder)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Encoder, Decoder)]
 #[cfg_attr(feature = "use_serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive()]
 pub enum SpuType {
+    #[default]
+    #[fluvio(tag = 0)]
     Managed,
+    #[fluvio(tag = 1)]
     Custom,
-}
-
-impl Default for SpuType {
-    fn default() -> Self {
-        SpuType::Managed
-    }
 }
 
 /// Return type label in String format
