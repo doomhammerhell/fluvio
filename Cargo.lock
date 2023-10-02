@@ -724,9 +724,9 @@ dependencies = [
 
 [[package]]
 name = "bytes"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b2fd2a0dcf38d7971e2194b6b6eebab45ae01067456a7fd93d5547a61b70be"
+checksum = "a2bd12c1caf447e69cd4528f47f94d203fd2582878ecb9e9465484c4148a8223"
 
 [[package]]
 name = "bytesize"
@@ -2297,7 +2297,7 @@ dependencies = [
  "async-std",
  "async-trait",
  "base64 0.21.2",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "cfg-if",
  "chrono",
  "derive_builder",
@@ -2555,7 +2555,7 @@ dependencies = [
 name = "fluvio-compression"
 version = "0.3.0"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "flate2",
  "lz4_flex",
  "serde",
@@ -2644,7 +2644,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.21.2",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "bytesize",
  "derive_builder",
  "flate2",
@@ -2796,7 +2796,7 @@ dependencies = [
 name = "fluvio-protocol"
 version = "0.10.5"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "content_inspector",
  "crc32c",
  "criterion",
@@ -2967,7 +2967,7 @@ dependencies = [
  "async-net",
  "async-trait",
  "built",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "cfg-if",
  "event-listener",
  "fluvio-future",
@@ -2995,7 +2995,7 @@ dependencies = [
  "async-net",
  "async-rwlock",
  "async-trait",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "cfg-if",
  "chrono",
  "clap",
@@ -3035,7 +3035,7 @@ dependencies = [
 name = "fluvio-spu-schema"
 version = "0.14.3"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "derive_builder",
  "educe",
  "flate2",
@@ -3060,7 +3060,7 @@ dependencies = [
  "async-lock",
  "async-trait",
  "blocking",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "clap",
  "derive_builder",
  "fluvio-controlplane-metadata",
@@ -3124,7 +3124,7 @@ dependencies = [
  "async-channel",
  "async-std",
  "async-trait",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "clap",
  "comfy-table",
  "crc",
@@ -3208,7 +3208,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "clap",
  "comfy-table",
  "dyn-clone",
@@ -3848,7 +3848,7 @@ version = "0.3.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97ec8491ebaf99c8eaa73058b045fe58073cd6be7f596ac993ced0b0a0c01049"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "fnv",
  "futures-core",
  "futures-sink",
@@ -3993,7 +3993,7 @@ version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd6effc99afb63425aff9b05836f029929e345a6148a14b7ecd5ab67af944482"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "fnv",
  "itoa",
 ]
@@ -4004,7 +4004,7 @@ version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "http",
  "pin-project-lite",
 ]
@@ -4084,7 +4084,7 @@ version = "0.14.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffb1cfd654a8219eaef89881fdb3bb3b1cdc5fa75ded05d6933b2b382e395468"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "futures-channel",
  "futures-core",
  "futures-util",
@@ -4122,7 +4122,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "hyper",
  "native-tls",
  "tokio",
@@ -4433,7 +4433,7 @@ checksum = "da4586095d434a231b33968cc08b00f8360f15f73971b7777793207125e4eeaf"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "cfg-if",
  "fluvio-future",
  "futures-util",
@@ -5936,7 +5936,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cde824a14b7c14f85caff81225f411faacc04a2013f41670f41443742b1c1c55"
 dependencies = [
  "base64 0.21.2",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "encoding_rs",
  "futures-core",
  "futures-util",
@@ -6670,7 +6670,7 @@ name = "smartmodule-development-kit"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "cargo-builder",
  "cargo-generate",
  "clap",
@@ -7178,7 +7178,7 @@ checksum = "532826ff75199d5833b9d2c5fe410f29235e25704ee5f0ef599fb51c21f4a4da"
 dependencies = [
  "autocfg",
  "backtrace",
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "libc",
  "mio",
  "num_cpus",
@@ -7236,7 +7236,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "806fe8c2c87eccc8b3267cbae29ed3ab2d0bd37fca70ab622e46aaa9375ddb7d"
 dependencies = [
- "bytes 1.4.0",
+ "bytes 1.5.0",
  "futures-core",
  "futures-io",
  "futures-sink",
