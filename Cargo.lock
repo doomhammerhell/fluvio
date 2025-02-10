@@ -376,7 +376,7 @@ version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff6e472cdea888a4bd64f342f09b3f50e1886d32afe8df3d663c01140b811b18"
 dependencies = [
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "event-listener-strategy",
  "pin-project-lite",
 ]
@@ -2187,9 +2187,9 @@ dependencies = [
 
 [[package]]
 name = "event-listener"
-version = "5.3.1"
+version = "5.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6032be9bd27023a771701cc49f9f053c751055f71efb2e0ae5c15809093675ba"
+checksum = "3492acde4c3fc54c845eaab3eed8bd00c7a7d881f78bfc801e43a93dec1331ae"
 dependencies = [
  "concurrent-queue",
  "parking",
@@ -2202,7 +2202,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f214dc438f977e6d4e3500aaa277f5ad94ca83fbbd9b1a15713ce2344ccc5a1"
 dependencies = [
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "pin-project-lite",
 ]
 
@@ -2316,7 +2316,7 @@ dependencies = [
  "chrono",
  "derive_builder",
  "dirs 5.0.1",
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "fluvio-compression",
  "fluvio-future",
  "fluvio-protocol",
@@ -2917,7 +2917,7 @@ dependencies = [
  "base64 0.22.1",
  "cfg-if",
  "clap",
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "fluvio",
  "fluvio-auth",
  "fluvio-controlplane",
@@ -3037,7 +3037,7 @@ dependencies = [
  "built",
  "bytes",
  "cfg-if",
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "fluvio-future",
  "fluvio-protocol",
  "fluvio-types",
@@ -3068,7 +3068,7 @@ dependencies = [
  "chrono",
  "clap",
  "derive_builder",
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "flate2",
  "fluvio",
  "fluvio-auth",
@@ -3162,7 +3162,7 @@ dependencies = [
  "async-lock 3.4.0",
  "async-trait",
  "cfg-if",
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "fluvio-future",
  "fluvio-stream-model",
  "fluvio-types",
@@ -3183,7 +3183,7 @@ name = "fluvio-stream-model"
 version = "0.11.3"
 dependencies = [
  "async-lock 3.4.0",
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "fluvio-future",
  "k8-types",
  "once_cell",
@@ -3303,7 +3303,7 @@ dependencies = [
 name = "fluvio-types"
 version = "0.5.0"
 dependencies = [
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "fluvio-future",
  "serde",
  "thiserror",
@@ -3380,7 +3380,7 @@ checksum = "c7e4b752f3c5146bb3318e201f75b0ddcd1b7d2e3b6aefb560a0ade46dbfb8cb"
 dependencies = [
  "async-trait",
  "cfg-if",
- "event-listener 5.3.1",
+ "event-listener 5.4.0",
  "fluvio-future",
  "futures-lite 2.3.0",
  "futures-util",
