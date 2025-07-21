@@ -170,7 +170,7 @@ uuid = { version = "1.1", features = ["serde", "v4"] }
 wasm-bindgen-test = "0.3.50"
 wasm-bindgen = "0.2.100"
 wasi-common = { version = "33.0.0" }
-wasmtime = { version = "33.0.0" }
+wasmtime = { version = "33.0.2" }
 wasmparser = "0.233.0"
 web-time = "1.1.0"
 which = "8.0"
