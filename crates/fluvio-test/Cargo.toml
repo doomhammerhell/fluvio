@@ -30,7 +30,7 @@ hdrhistogram = { workspace = true }
 crc = "3.0"
 fork = "0.2"
 sysinfo = { workspace = true }
-signal-hook = "0.3.13"
+signal-hook = "0.4.3"
 indicatif = { workspace = true }
 humantime = { workspace = true }
 
