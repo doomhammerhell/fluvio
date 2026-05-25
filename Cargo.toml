@@ -174,7 +174,7 @@ wasmtime = { version = "33.0.0" }
 wasmparser = "0.233.0"
 web-time = "1.1.0"
 which = "8.0"
-x509-parser = "0.17.0"
+x509-parser = "0.18.1"
 
 # External fluvio dependencies
 fluvio_ws_stream_wasm = "0.7.0"
