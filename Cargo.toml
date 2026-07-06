@@ -133,7 +133,7 @@ proc-macro2 = "1.0"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rand_xoshiro = "0.6.0"
+rand_xoshiro = "0.8.1"
 regex = "1.7"
 reqwest = "0.12"
 schemars = { version = "0.8.22" }
